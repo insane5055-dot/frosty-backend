@@ -1,3 +1,4 @@
+import os
 import pytz
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -529,4 +530,5 @@ def history():
 # ==================================================
 if __name__ == "__main__":
     start_ws_thread()
-    socketio.run(app, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port)
