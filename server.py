@@ -1,5 +1,5 @@
 # =========================================================
-# FINAL FAST WORKING SERVER.PY
+# ULTRA FAST FINAL SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -61,7 +61,7 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MjUwMTMzLCJpYXQiOjE3NzgxNjM3MzMsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.x-daOdl1vYeM_yG-D_fT4ZkrjgULDC-XsVZqxFF3gI3cJZTSzoj3BYtnkmbB2rQ16wun-yCfioA1j-nmMALVOg"
 
 HEADERS = {
     "Accept": "application/json",
@@ -70,19 +70,27 @@ HEADERS = {
 }
 
 # =========================================================
-# SCRIP MASTER
+# GLOBALS
 # =========================================================
 
 SCRIP_MASTER = None
+
+SEARCH_CACHE = []
 
 COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
 
+# =========================================================
+# LOAD SCRIP MASTER
+# =========================================================
+
 def load_scrip_master():
 
     global SCRIP_MASTER
+    global SEARCH_CACHE
+
     global COL_DISPLAY
     global COL_SECURITY
     global COL_EXCHANGE
@@ -123,6 +131,15 @@ def load_scrip_master():
     )
 
     # =====================================================
+    # CLEAN DATA
+    # =====================================================
+
+    SCRIP_MASTER.dropna(
+        subset=[COL_DISPLAY],
+        inplace=True
+    )
+
+    # =====================================================
     # PREPROCESS
     # =====================================================
 
@@ -133,13 +150,37 @@ def load_scrip_master():
     )
 
     # =====================================================
-    # FILTER ONLY REQUIRED EXCHANGES
+    # FAST SEARCH CACHE
     # =====================================================
 
-    SCRIP_MASTER.dropna(
-        subset=[COL_DISPLAY],
-        inplace=True
-    )
+    for _, row in SCRIP_MASTER.iterrows():
+
+        exchange = str(row[COL_EXCHANGE])
+
+        if exchange not in [
+            "NSE",
+            "BSE",
+            "NSE_FNO",
+            "IDX_I"
+        ]:
+            continue
+
+        SEARCH_CACHE.append({
+
+            "display_upper":
+            str(row[COL_DISPLAY]).upper(),
+
+            "symbol":
+            row[COL_DISPLAY],
+
+            "exchange":
+            exchange,
+
+            "instrument":
+            row[COL_INSTRUMENT]
+        })
+
+    print("⚡ Search cache ready:", len(SEARCH_CACHE))
 
     print("✅ Scrip Master Loaded")
 
@@ -153,7 +194,7 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# SEARCH
+# ULTRA FAST SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -162,77 +203,53 @@ def search_symbols():
 
     try:
 
-        load_scrip_master()
-
         q = request.args.get(
             "q",
             ""
         ).upper().strip()
 
-        print("🔍 SEARCH:", q)
-
         if not q:
             return jsonify([])
 
-        # =================================================
-        # SEARCH PRIORITY
-        # =================================================
-
-        exact_match = SCRIP_MASTER[
-            SCRIP_MASTER["DISPLAY_UPPER"] == q
-        ]
-
-        starts_with = SCRIP_MASTER[
-            SCRIP_MASTER["DISPLAY_UPPER"]
-            .str.startswith(q, na=False)
-        ]
-
-        contains = SCRIP_MASTER[
-            SCRIP_MASTER["DISPLAY_UPPER"]
-            .str.contains(
-                q,
-                na=False,
-                regex=False
-            )
-        ]
+        exact = []
+        starts = []
+        contains = []
 
         # =================================================
-        # FAST CONCAT
+        # FAST LOOP SEARCH
         # =================================================
 
-        df = pd.concat([
+        for item in SEARCH_CACHE:
 
-            exact_match,
+            name = item["display_upper"]
 
-            starts_with.head(20),
+            if name == q:
 
-            contains.head(20)
+                exact.append(item)
 
-        ]).drop_duplicates()
+            elif name.startswith(q):
+
+                starts.append(item)
+
+            elif q in name:
+
+                contains.append(item)
 
         # =================================================
-        # FILTER EXCHANGES
+        # PRIORITY RESULT
         # =================================================
 
-        df = df[
-            df[COL_EXCHANGE]
-            .isin([
-                "NSE",
-                "BSE",
-                "NSE_FNO",
-                "IDX_I"
-            ])
-        ]
+        final = (
+            exact[:5] +
+            starts[:10] +
+            contains[:10]
+        )
 
         results = []
 
-        # =================================================
-        # LIMIT RESULTS
-        # =================================================
+        for item in final:
 
-        for _, r in df.head(15).iterrows():
-
-            instr = str(r[COL_INSTRUMENT])
+            instr = str(item["instrument"])
 
             if "INDEX" in instr:
 
@@ -259,19 +276,19 @@ def search_symbols():
             results.append({
 
                 "symbol":
-                r[COL_DISPLAY],
+                item["symbol"],
 
                 "ticker":
-                f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
+                f"{item['exchange']}:{item['symbol']}",
 
                 "full_name":
-                f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
+                f"{item['exchange']}:{item['symbol']}",
 
                 "description":
-                r[COL_DISPLAY],
+                item["symbol"],
 
                 "exchange":
-                r[COL_EXCHANGE],
+                item["exchange"],
 
                 "type":
                 tv_type
@@ -281,11 +298,9 @@ def search_symbols():
 
     except Exception as e:
 
-        print("❌ SEARCH ERROR:", str(e))
+        print("❌ SEARCH ERROR:", e)
 
-        return jsonify({
-            "error": str(e)
-        }), 500
+        return jsonify([])
 
 # =========================================================
 # RESOLVE
@@ -366,10 +381,6 @@ def resolve_symbol():
             pricescale = 100
 
         else:
-
-            # =============================================
-            # EQUITY SEGMENT
-            # =============================================
 
             if row[COL_EXCHANGE] == "BSE":
 
@@ -569,34 +580,15 @@ def history():
 
     try:
 
-        security_id = request.args.get(
-            "security_id"
-        )
+        security_id = request.args.get("security_id")
+        exchange = request.args.get("exchange")
+        instrument = request.args.get("instrument")
+        resolution = request.args.get("resolution", "1")
 
-        exchange = request.args.get(
-            "exchange"
-        )
+        from_ts = int(request.args.get("from"))
+        to_ts = int(request.args.get("to"))
 
-        instrument = request.args.get(
-            "instrument"
-        )
-
-        resolution = request.args.get(
-            "resolution",
-            "1"
-        )
-
-        from_ts = int(
-            request.args.get("from")
-        )
-
-        to_ts = int(
-            request.args.get("to")
-        )
-
-        ist = pytz.timezone(
-            "Asia/Kolkata"
-        )
+        ist = pytz.timezone("Asia/Kolkata")
 
         from_dt = datetime.fromtimestamp(
             from_ts,
