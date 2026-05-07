@@ -40,9 +40,7 @@ CORS(
 def after_request(response):
 
     response.headers["Access-Control-Allow-Origin"] = "*"
-
     response.headers["Access-Control-Allow-Headers"] = "*"
-
     response.headers["Access-Control-Allow-Methods"] = "*"
 
     return response
@@ -341,8 +339,21 @@ def resolve_symbol():
 
         else:
 
-            exchange_segment = "NSE_EQ"
+            # =============================================
+            # EQUITY SEGMENT
+            # =============================================
+
+            if row[COL_EXCHANGE] == "BSE":
+
+                exchange_segment = "BSE_EQ"
+
+            else:
+
+                exchange_segment = "NSE_EQ"
+
             pricescale = 100
+
+            print("SEGMENT:", exchange_segment)
 
         return jsonify({
 
