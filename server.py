@@ -270,9 +270,9 @@ def search_symbols():
 
         results.append({
             "symbol": r[COL_DISPLAY],
-            "full_name": r[COL_EXCHANGE] + ":" + r[COL_DISPLAY],
+            "full_name": r[COL_DISPLAY],
             "description": r[COL_DISPLAY],
-            "exchange": r[COL_EXCHANGE],
+            "exchange": "",
             "ticker": r[COL_EXCHANGE] + ":" + r[COL_DISPLAY],
             "type": tv_type
         })
