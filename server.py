@@ -1,6 +1,9 @@
 # =========================================================
-# FINAL UPDATED SERVER.PY
+# FINAL WORKING SERVER.PY
 # =========================================================
+
+from gevent import monkey
+monkey.patch_all()
 
 import os
 import pytz
@@ -24,30 +27,38 @@ from flask_socketio import SocketIO
 
 app = Flask(__name__)
 
+# =========================================================
+# CORS FIX
+# =========================================================
+
 CORS(
     app,
-    resources={r"/*": {"origins": "*"}},
-    supports_credentials=True
+    resources={
+        r"/*": {
+            "origins": [
+                "https://www.frostytrader.in",
+                "https://frostytrader.in",
+                "http://localhost:5500",
+                "http://127.0.0.1:5500"
+            ]
+        }
+    }
 )
+
+# =========================================================
+# SOCKET.IO
+# =========================================================
 
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
-    async_mode="threading"
+    cors_allowed_origins=[
+        "https://www.frostytrader.in",
+        "https://frostytrader.in",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500"
+    ],
+    async_mode="gevent"
 )
-
-# =========================================================
-# AFTER REQUEST (IMPORTANT FOR CORS)
-# =========================================================
-
-@app.after_request
-def after_request(response):
-
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "*")
-    response.headers.add("Access-Control-Allow-Methods", "*")
-
-    return response
 
 # =========================================================
 # DHAN CONFIG
@@ -114,7 +125,7 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# SEARCH
+# SEARCH SYMBOLS
 # =========================================================
 
 @app.route("/search")
@@ -162,11 +173,17 @@ def search_symbols():
                 tv_type = "stock"
 
             results.append({
+
                 "symbol": r[COL_DISPLAY],
-                "full_name": r[COL_EXCHANGE] + ":" + r[COL_DISPLAY],
+
+                "ticker": f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
+
+                "full_name": f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
+
                 "description": r[COL_DISPLAY],
+
                 "exchange": r[COL_EXCHANGE],
-                "ticker": r[COL_EXCHANGE] + ":" + r[COL_DISPLAY],
+
                 "type": tv_type
             })
 
@@ -181,7 +198,7 @@ def search_symbols():
         }), 500
 
 # =========================================================
-# RESOLVE
+# RESOLVE SYMBOL
 # =========================================================
 
 @app.route("/resolve")
@@ -226,10 +243,6 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
-        # =====================================================
-        # EXCHANGE SEGMENT
-        # =====================================================
-
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
@@ -249,7 +262,7 @@ def resolve_symbol():
 
             "name": row[COL_DISPLAY],
 
-            "ticker": row[COL_EXCHANGE] + ":" + row[COL_DISPLAY],
+            "ticker": f"{row[COL_EXCHANGE]}:{row[COL_DISPLAY]}",
 
             "description": row[COL_DISPLAY],
 
@@ -292,7 +305,7 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
-# INTRADAY FETCH
+# FETCH INTRADAY DATA
 # =========================================================
 
 def get_intraday_ohlc(
@@ -459,7 +472,7 @@ def history():
         })
 
 # =========================================================
-# WEBSOCKET
+# LIVE WEBSOCKET
 # =========================================================
 
 current_candle = None
@@ -553,12 +566,10 @@ def start_dhan_ws():
             "InstrumentCount": 1,
 
             "InstrumentList": [
-
                 {
                     "ExchangeSegment": "IDX_I",
                     "SecurityId": "13"
                 }
-
             ]
         }
 
@@ -590,7 +601,7 @@ def start_dhan_ws():
     ws.run_forever(ping_interval=20)
 
 # =========================================================
-# START WS THREAD
+# START THREAD
 # =========================================================
 
 def start_ws_thread():
@@ -606,6 +617,8 @@ def start_ws_thread():
 
 if __name__ == "__main__":
 
+    load_scrip_master()
+
     start_ws_thread()
 
     port = int(os.environ.get("PORT", 5000))
@@ -613,6 +626,5 @@ if __name__ == "__main__":
     socketio.run(
         app,
         host="0.0.0.0",
-        port=port,
-        allow_unsafe_werkzeug=True
+        port=port
     )
