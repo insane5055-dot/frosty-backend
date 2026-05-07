@@ -1,5 +1,5 @@
 # =========================================================
-# FINAL UPDATED SERVER.PY
+# FINAL WORKING SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -18,7 +18,7 @@ import websocket
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
 
 # =========================================================
@@ -33,17 +33,19 @@ app = Flask(__name__)
 
 CORS(
     app,
-    resources={
-        r"/*": {
-            "origins": [
-                "https://www.frostytrader.in",
-                "https://frostytrader.in",
-                "http://localhost:5500",
-                "http://127.0.0.1:5500"
-            ]
-        }
-    }
+    resources={r"/*": {"origins": "*"}}
 )
+
+@app.after_request
+def after_request(response):
+
+    response.headers["Access-Control-Allow-Origin"] = "*"
+
+    response.headers["Access-Control-Allow-Headers"] = "*"
+
+    response.headers["Access-Control-Allow-Methods"] = "*"
+
+    return response
 
 # =========================================================
 # SOCKET.IO
@@ -61,7 +63,7 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MjUwMTMzLCJpYXQiOjE3NzgxNjM3MzMsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.x-daOdl1vYeM_yG-D_fT4ZkrjgULDC-XsVZqxFF3gI3cJZTSzoj3BYtnkmbB2rQ16wun-yCfioA1j-nmMALVOg"
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
 
 HEADERS = {
     "Accept": "application/json",
@@ -70,7 +72,7 @@ HEADERS = {
 }
 
 # =========================================================
-# LOAD SCRIP MASTER
+# SCRIP MASTER
 # =========================================================
 
 SCRIP_MASTER = None
@@ -98,7 +100,9 @@ def load_scrip_master():
         low_memory=False
     )
 
-    SCRIP_MASTER.columns = SCRIP_MASTER.columns.str.upper()
+    SCRIP_MASTER.columns = (
+        SCRIP_MASTER.columns.str.upper()
+    )
 
     COL_DISPLAY = next(
         c for c in SCRIP_MASTER.columns
@@ -142,13 +146,17 @@ def home():
 # =========================================================
 
 @app.route("/search")
+@cross_origin()
 def search_symbols():
 
     try:
 
         load_scrip_master()
 
-        q = request.args.get("q", "").upper().strip()
+        q = request.args.get(
+            "q",
+            ""
+        ).upper().strip()
 
         print("🔍 SEARCH:", q)
 
@@ -156,7 +164,7 @@ def search_symbols():
             return jsonify([])
 
         # =================================================
-        # PRIORITY SEARCH
+        # SEARCH PRIORITY
         # =================================================
 
         exact_match = SCRIP_MASTER[
@@ -180,7 +188,7 @@ def search_symbols():
         ]).drop_duplicates()
 
         # =================================================
-        # EXCHANGE FILTER
+        # FILTER EXCHANGES
         # =================================================
 
         df = df[
@@ -203,11 +211,17 @@ def search_symbols():
 
                 tv_type = "index"
 
-            elif instr in ["FUTIDX", "FUTSTK"]:
+            elif instr in [
+                "FUTIDX",
+                "FUTSTK"
+            ]:
 
                 tv_type = "futures"
 
-            elif instr in ["OPTIDX", "OPTSTK"]:
+            elif instr in [
+                "OPTIDX",
+                "OPTSTK"
+            ]:
 
                 tv_type = "option"
 
@@ -219,15 +233,20 @@ def search_symbols():
 
                 "symbol": r[COL_DISPLAY],
 
-                "ticker": f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
+                "ticker":
+                f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
 
-                "full_name": f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
+                "full_name":
+                f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
 
-                "description": r[COL_DISPLAY],
+                "description":
+                r[COL_DISPLAY],
 
-                "exchange": r[COL_EXCHANGE],
+                "exchange":
+                r[COL_EXCHANGE],
 
-                "type": tv_type
+                "type":
+                tv_type
             })
 
         print("✅ Results:", len(results))
@@ -247,6 +266,7 @@ def search_symbols():
 # =========================================================
 
 @app.route("/resolve")
+@cross_origin()
 def resolve_symbol():
 
     try:
@@ -301,7 +321,7 @@ def resolve_symbol():
         instrument = str(row[COL_INSTRUMENT])
 
         # =================================================
-        # SEGMENT
+        # EXCHANGE SEGMENT
         # =================================================
 
         if "INDEX" in instrument:
@@ -326,43 +346,56 @@ def resolve_symbol():
 
         return jsonify({
 
-            "name": row[COL_DISPLAY],
+            "name":
+            row[COL_DISPLAY],
 
-            "ticker": f"{row[COL_EXCHANGE]}:{row[COL_DISPLAY]}",
+            "ticker":
+            f"{row[COL_EXCHANGE]}:{row[COL_DISPLAY]}",
 
-            "description": row[COL_DISPLAY],
+            "description":
+            row[COL_DISPLAY],
 
-            "type": instrument,
+            "type":
+            instrument,
 
-            "exchange": row[COL_EXCHANGE],
+            "exchange":
+            row[COL_EXCHANGE],
 
-            "session": "0915-1530",
+            "session":
+            "0915-1530",
 
-            "timezone": "Asia/Kolkata",
+            "timezone":
+            "Asia/Kolkata",
 
-            "minmov": 1,
+            "minmov":
+            1,
 
-            "pricescale": pricescale,
+            "pricescale":
+            pricescale,
 
-            "has_intraday": True,
+            "has_intraday":
+            True,
 
-            "has_daily": True,
+            "has_daily":
+            True,
 
-            "has_weekly_and_monthly": True,
+            "has_weekly_and_monthly":
+            True,
 
-            "supported_resolutions": [
-                "1",
-                "5",
-                "15"
-            ],
+            "supported_resolutions":
+            ["1", "5", "15"],
 
-            "data_status": "streaming",
+            "data_status":
+            "streaming",
 
-            "security_id": str(row[COL_SECURITY]),
+            "security_id":
+            str(row[COL_SECURITY]),
 
-            "instrument": instrument,
+            "instrument":
+            instrument,
 
-            "exchange_segment": exchange_segment
+            "exchange_segment":
+            exchange_segment
         })
 
     except Exception as e:
@@ -472,13 +505,19 @@ def aggregate_candles(candles, step):
 
             "open": chunk[0]["open"],
 
-            "high": max(c["high"] for c in chunk),
+            "high": max(
+                c["high"] for c in chunk
+            ),
 
-            "low": min(c["low"] for c in chunk),
+            "low": min(
+                c["low"] for c in chunk
+            ),
 
             "close": chunk[-1]["close"],
 
-            "volume": sum(c["volume"] for c in chunk)
+            "volume": sum(
+                c["volume"] for c in chunk
+            )
         })
 
     return out
@@ -488,26 +527,39 @@ def aggregate_candles(candles, step):
 # =========================================================
 
 @app.route("/history")
+@cross_origin()
 def history():
 
     try:
 
-        security_id = request.args.get("security_id")
+        security_id = request.args.get(
+            "security_id"
+        )
 
-        exchange = request.args.get("exchange")
+        exchange = request.args.get(
+            "exchange"
+        )
 
-        instrument = request.args.get("instrument")
+        instrument = request.args.get(
+            "instrument"
+        )
 
         resolution = request.args.get(
             "resolution",
             "1"
         )
 
-        from_ts = int(request.args.get("from"))
+        from_ts = int(
+            request.args.get("from")
+        )
 
-        to_ts = int(request.args.get("to"))
+        to_ts = int(
+            request.args.get("to")
+        )
 
-        ist = pytz.timezone("Asia/Kolkata")
+        ist = pytz.timezone(
+            "Asia/Kolkata"
+        )
 
         from_dt = datetime.fromtimestamp(
             from_ts,
@@ -567,17 +619,23 @@ def history():
 
             "s": "ok",
 
-            "t": [c["time"] for c in candles],
+            "t":
+            [c["time"] for c in candles],
 
-            "o": [c["open"] for c in candles],
+            "o":
+            [c["open"] for c in candles],
 
-            "h": [c["high"] for c in candles],
+            "h":
+            [c["high"] for c in candles],
 
-            "l": [c["low"] for c in candles],
+            "l":
+            [c["low"] for c in candles],
 
-            "c": [c["close"] for c in candles],
+            "c":
+            [c["close"] for c in candles],
 
-            "v": [c["volume"] for c in candles]
+            "v":
+            [c["volume"] for c in candles]
         })
 
     except Exception as e:
