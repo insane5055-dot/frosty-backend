@@ -1,19 +1,19 @@
 # =========================================================
-# FINAL WORKING SERVER.PY
+# FINAL UPDATED SERVER.PY
 # =========================================================
 
 from gevent import monkey
 monkey.patch_all()
 
 import os
-import pytz
-import requests
-import pandas as pd
-import websocket
-import threading
 import json
 import time
 import struct
+import threading
+import requests
+import pandas as pd
+import pytz
+import websocket
 
 from datetime import datetime, timedelta
 
@@ -28,7 +28,7 @@ from flask_socketio import SocketIO
 app = Flask(__name__)
 
 # =========================================================
-# CORS FIX
+# CORS
 # =========================================================
 
 CORS(
@@ -51,13 +51,10 @@ CORS(
 
 socketio = SocketIO(
     app,
-    cors_allowed_origins=[
-        "https://www.frostytrader.in",
-        "https://frostytrader.in",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500"
-    ],
-    async_mode="gevent"
+    cors_allowed_origins="*",
+    async_mode="gevent",
+    ping_timeout=30,
+    ping_interval=25
 )
 
 # =========================================================
@@ -103,10 +100,25 @@ def load_scrip_master():
 
     SCRIP_MASTER.columns = SCRIP_MASTER.columns.str.upper()
 
-    COL_DISPLAY = next(c for c in SCRIP_MASTER.columns if "DISPLAY" in c)
-    COL_SECURITY = next(c for c in SCRIP_MASTER.columns if "SECURITY" in c)
-    COL_EXCHANGE = next(c for c in SCRIP_MASTER.columns if "EXCH" in c)
-    COL_INSTRUMENT = next(c for c in SCRIP_MASTER.columns if "INSTRUMENT" in c)
+    COL_DISPLAY = next(
+        c for c in SCRIP_MASTER.columns
+        if "DISPLAY" in c
+    )
+
+    COL_SECURITY = next(
+        c for c in SCRIP_MASTER.columns
+        if "SECURITY" in c
+    )
+
+    COL_EXCHANGE = next(
+        c for c in SCRIP_MASTER.columns
+        if "EXCH" in c
+    )
+
+    COL_INSTRUMENT = next(
+        c for c in SCRIP_MASTER.columns
+        if "INSTRUMENT" in c
+    )
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
@@ -122,10 +134,11 @@ def load_scrip_master():
 
 @app.route("/")
 def home():
+
     return "Backend running OK"
 
 # =========================================================
-# SEARCH SYMBOLS
+# SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -137,21 +150,47 @@ def search_symbols():
 
         q = request.args.get("q", "").upper().strip()
 
-        print("SEARCH:", q)
+        print("🔍 SEARCH:", q)
 
         if not q:
             return jsonify([])
 
-        df = SCRIP_MASTER.copy()
+        # =================================================
+        # PRIORITY SEARCH
+        # =================================================
 
-        df = df[
-            df["DISPLAY_UPPER"]
+        exact_match = SCRIP_MASTER[
+            SCRIP_MASTER["DISPLAY_UPPER"] == q
+        ]
+
+        starts_with = SCRIP_MASTER[
+            SCRIP_MASTER["DISPLAY_UPPER"]
+            .str.startswith(q, na=False)
+        ]
+
+        contains = SCRIP_MASTER[
+            SCRIP_MASTER["DISPLAY_UPPER"]
             .str.contains(q, na=False)
         ]
 
+        df = pd.concat([
+            exact_match,
+            starts_with,
+            contains
+        ]).drop_duplicates()
+
+        # =================================================
+        # EXCHANGE FILTER
+        # =================================================
+
         df = df[
             df[COL_EXCHANGE]
-            .isin(["NSE", "BSE", "NSE_FNO", "IDX_I"])
+            .isin([
+                "NSE",
+                "BSE",
+                "NSE_FNO",
+                "IDX_I"
+            ])
         ]
 
         results = []
@@ -161,15 +200,19 @@ def search_symbols():
             instr = str(r[COL_INSTRUMENT])
 
             if "INDEX" in instr:
+
                 tv_type = "index"
 
             elif instr in ["FUTIDX", "FUTSTK"]:
+
                 tv_type = "futures"
 
             elif instr in ["OPTIDX", "OPTSTK"]:
+
                 tv_type = "option"
 
             else:
+
                 tv_type = "stock"
 
             results.append({
@@ -187,18 +230,20 @@ def search_symbols():
                 "type": tv_type
             })
 
+        print("✅ Results:", len(results))
+
         return jsonify(results)
 
     except Exception as e:
 
-        print("SEARCH ERROR:", str(e))
+        print("❌ SEARCH ERROR:", str(e))
 
         return jsonify({
             "error": str(e)
         }), 500
 
 # =========================================================
-# RESOLVE SYMBOL
+# RESOLVE
 # =========================================================
 
 @app.route("/resolve")
@@ -208,13 +253,21 @@ def resolve_symbol():
 
         load_scrip_master()
 
-        symbol_raw = request.args.get("symbol", "").upper().strip()
+        symbol_raw = request.args.get(
+            "symbol",
+            ""
+        ).upper().strip()
 
-        print("RESOLVE:", symbol_raw)
+        print("📌 RESOLVE:", symbol_raw)
 
         if ":" in symbol_raw:
-            exchange_param, symbol = symbol_raw.split(":", 1)
+
+            exchange_param, symbol = (
+                symbol_raw.split(":", 1)
+            )
+
         else:
+
             exchange_param = ""
             symbol = symbol_raw
 
@@ -232,9 +285,13 @@ def resolve_symbol():
         row = df[df["MATCH"] == symbol]
 
         if exchange_param:
-            row = row[row[COL_EXCHANGE] == exchange_param]
+
+            row = row[
+                row[COL_EXCHANGE] == exchange_param
+            ]
 
         if row.empty:
+
             return jsonify({
                 "error": "symbol not found"
             }), 404
@@ -243,12 +300,21 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
+        # =================================================
+        # SEGMENT
+        # =================================================
+
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
             pricescale = 1
 
-        elif instrument in ["OPTIDX", "FUTIDX", "OPTSTK", "FUTSTK"]:
+        elif instrument in [
+            "OPTIDX",
+            "FUTIDX",
+            "OPTSTK",
+            "FUTSTK"
+        ]:
 
             exchange_segment = "NSE_FNO"
             pricescale = 100
@@ -284,7 +350,11 @@ def resolve_symbol():
 
             "has_weekly_and_monthly": True,
 
-            "supported_resolutions": ["1", "5", "15"],
+            "supported_resolutions": [
+                "1",
+                "5",
+                "15"
+            ],
 
             "data_status": "streaming",
 
@@ -293,19 +363,18 @@ def resolve_symbol():
             "instrument": instrument,
 
             "exchange_segment": exchange_segment
-
         })
 
     except Exception as e:
 
-        print("RESOLVE ERROR:", str(e))
+        print("❌ RESOLVE ERROR:", str(e))
 
         return jsonify({
             "error": str(e)
         }), 500
 
 # =========================================================
-# FETCH INTRADAY DATA
+# FETCH INTRADAY
 # =========================================================
 
 def get_intraday_ohlc(
@@ -319,12 +388,19 @@ def get_intraday_ohlc(
     url = "https://api.dhan.co/v2/charts/intraday"
 
     payload = {
+
         "securityId": str(security_id),
+
         "exchangeSegment": exchange,
+
         "instrument": instrument,
+
         "interval": "1",
+
         "oi": False,
+
         "fromDate": from_date,
+
         "toDate": to_date
     }
 
@@ -332,11 +408,13 @@ def get_intraday_ohlc(
         url,
         headers=HEADERS,
         json=payload,
-        timeout=15
+        timeout=20
     )
 
     if r.status_code != 200:
-        print("DHAN ERROR:", r.text)
+
+        print("❌ DHAN ERROR:", r.text)
+
         return []
 
     res = r.json()
@@ -354,17 +432,24 @@ def get_intraday_ohlc(
             ts //= 1000
 
         data.append({
+
             "time": ts,
+
             "open": res["open"][i],
+
             "high": res["high"][i],
+
             "low": res["low"][i],
+
             "close": res["close"][i],
+
             "volume": res.get("volume", [0])[i]
         })
 
-    data = sorted(data, key=lambda x: x["time"])
-
-    return data
+    return sorted(
+        data,
+        key=lambda x: x["time"]
+    )
 
 # =========================================================
 # AGGREGATE
@@ -376,17 +461,23 @@ def aggregate_candles(candles, step):
 
     for i in range(0, len(candles), step):
 
-        chunk = candles[i:i+step]
+        chunk = candles[i:i + step]
 
         if len(chunk) < step:
             continue
 
         out.append({
+
             "time": chunk[0]["time"],
+
             "open": chunk[0]["open"],
+
             "high": max(c["high"] for c in chunk),
+
             "low": min(c["low"] for c in chunk),
+
             "close": chunk[-1]["close"],
+
             "volume": sum(c["volume"] for c in chunk)
         })
 
@@ -402,11 +493,18 @@ def history():
     try:
 
         security_id = request.args.get("security_id")
+
         exchange = request.args.get("exchange")
+
         instrument = request.args.get("instrument")
-        resolution = request.args.get("resolution", "1")
+
+        resolution = request.args.get(
+            "resolution",
+            "1"
+        )
 
         from_ts = int(request.args.get("from"))
+
         to_ts = int(request.args.get("to"))
 
         ist = pytz.timezone("Asia/Kolkata")
@@ -421,8 +519,13 @@ def history():
             tz=ist
         )
 
-        from_date = from_dt.strftime("%Y-%m-%d %H:%M:%S")
-        to_date = to_dt.strftime("%Y-%m-%d %H:%M:%S")
+        from_date = from_dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        to_date = to_dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
         candles_1m = get_intraday_ohlc(
             security_id,
@@ -433,15 +536,31 @@ def history():
         )
 
         if not candles_1m:
-            return jsonify({"s": "no_data"})
+
+            return jsonify({
+                "s": "no_data"
+            })
+
+        # =============================================
+        # AGGREGATION
+        # =============================================
 
         if resolution == "5":
-            candles = aggregate_candles(candles_1m, 5)
+
+            candles = aggregate_candles(
+                candles_1m,
+                5
+            )
 
         elif resolution == "15":
-            candles = aggregate_candles(candles_1m, 15)
+
+            candles = aggregate_candles(
+                candles_1m,
+                15
+            )
 
         else:
+
             candles = candles_1m
 
         return jsonify({
@@ -459,15 +578,16 @@ def history():
             "c": [c["close"] for c in candles],
 
             "v": [c["volume"] for c in candles]
-
         })
 
     except Exception as e:
 
-        print("HISTORY ERROR:", str(e))
+        print("❌ HISTORY ERROR:", str(e))
 
         return jsonify({
+
             "s": "error",
+
             "errmsg": str(e)
         })
 
@@ -482,16 +602,23 @@ def process_tick(price, volume):
     global current_candle
 
     ts = int(time.time())
+
     minute = ts // 60
 
     if current_candle is None:
 
         current_candle = {
+
             "minute": minute,
+
             "open": price,
+
             "high": price,
+
             "low": price,
+
             "close": price,
+
             "volume": volume
         }
 
@@ -518,15 +645,25 @@ def process_tick(price, volume):
     finished = current_candle
 
     current_candle = {
+
         "minute": minute,
+
         "open": price,
+
         "high": price,
+
         "low": price,
+
         "close": price,
+
         "volume": volume
     }
 
     return finished
+
+# =========================================================
+# DHAN WS
+# =========================================================
 
 def start_dhan_ws():
 
@@ -542,22 +679,29 @@ def start_dhan_ws():
                 return
 
             ltp = round(
-                struct.unpack('<f', message[8:12])[0],
+                struct.unpack(
+                    '<f',
+                    message[8:12]
+                )[0],
                 2
             )
 
             candle = process_tick(ltp, 0)
 
             if candle:
-                socketio.emit("candle", candle)
+
+                socketio.emit(
+                    "candle",
+                    candle
+                )
 
         except Exception as e:
 
-            print("WS DECODE ERROR:", e)
+            print("❌ WS DECODE ERROR:", e)
 
     def on_open(ws):
 
-        print("✅ WS Connected")
+        print("✅ Dhan WS Connected")
 
         subscribe = {
 
@@ -579,11 +723,15 @@ def start_dhan_ws():
 
     def on_error(ws, error):
 
-        print("❌ WS ERROR:", error)
+        print("❌ DHAN WS ERROR:", error)
 
     def on_close(ws, a, b):
 
-        print("❌ WS CLOSED")
+        print("❌ DHAN WS CLOSED")
+
+        time.sleep(5)
+
+        start_ws_thread()
 
     ws = websocket.WebSocketApp(
 
@@ -598,7 +746,10 @@ def start_dhan_ws():
         on_close=on_close
     )
 
-    ws.run_forever(ping_interval=20)
+    ws.run_forever(
+        ping_interval=20,
+        ping_timeout=10
+    )
 
 # =========================================================
 # START THREAD
@@ -621,7 +772,9 @@ if __name__ == "__main__":
 
     start_ws_thread()
 
-    port = int(os.environ.get("PORT", 5000))
+    port = int(
+        os.environ.get("PORT", 5000)
+    )
 
     socketio.run(
         app,
