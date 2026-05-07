@@ -1,5 +1,5 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
+# ULTRA FAST FINAL SERVER.PY + REALTIME TICK MA
 # =========================================================
 
 from gevent import monkey
@@ -15,6 +15,7 @@ import pandas as pd
 import pytz
 import websocket
 
+from collections import deque
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
@@ -61,7 +62,7 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MjUwMTMzLCJpYXQiOjE3NzgxNjM3MzMsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.x-daOdl1vYeM_yG-D_fT4ZkrjgULDC-XsVZqxFF3gI3cJZTSzoj3BYtnkmbB2rQ16wun-yCfioA1j-nmMALVOg"
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
 
 HEADERS = {
     "Accept": "application/json",
@@ -81,6 +82,20 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
+
+# =========================================================
+# 🔥 REALTIME TICK MA
+# =========================================================
+
+tick_prices = deque(maxlen=20)
+
+def calculate_tick_ma(price):
+
+    tick_prices.append(price)
+
+    ma = sum(tick_prices) / len(tick_prices)
+
+    return round(ma, 2)
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -130,28 +145,16 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
-    # =====================================================
-    # CLEAN DATA
-    # =====================================================
-
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
-
-    # =====================================================
-    # PREPROCESS
-    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
-
-    # =====================================================
-    # FAST SEARCH CACHE
-    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -194,7 +197,7 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# ULTRA FAST SEARCH
+# SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -215,10 +218,6 @@ def search_symbols():
         starts = []
         contains = []
 
-        # =================================================
-        # FAST LOOP SEARCH
-        # =================================================
-
         for item in SEARCH_CACHE:
 
             name = item["display_upper"]
@@ -234,10 +233,6 @@ def search_symbols():
             elif q in name:
 
                 contains.append(item)
-
-        # =================================================
-        # PRIORITY RESULT
-        # =================================================
 
         final = (
             exact[:5] +
@@ -360,10 +355,6 @@ def resolve_symbol():
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
-
-        # =================================================
-        # EXCHANGE SEGMENT
-        # =================================================
 
         if "INDEX" in instrument:
 
@@ -493,8 +484,6 @@ def get_intraday_ohlc(
     )
 
     if r.status_code != 200:
-
-        print("❌ DHAN ERROR:", r.text)
 
         return []
 
@@ -668,14 +657,12 @@ def history():
         print("❌ HISTORY ERROR:", str(e))
 
         return jsonify({
-
             "s": "error",
-
             "errmsg": str(e)
         })
 
 # =========================================================
-# LIVE WEBSOCKET
+# LIVE CANDLE ENGINE
 # =========================================================
 
 current_candle = None
@@ -768,6 +755,25 @@ def start_dhan_ws():
                 )[0],
                 2
             )
+
+            # =================================================
+            # 🔥 REALTIME TICK MA
+            # =================================================
+
+            tick_ma = calculate_tick_ma(ltp)
+
+            socketio.emit(
+                "tick_ma",
+                {
+                    "time": int(time.time()),
+                    "price": ltp,
+                    "tick_ma": tick_ma
+                }
+            )
+
+            # =================================================
+            # 🔥 CANDLE ENGINE
+            # =================================================
 
             candle = process_tick(ltp, 0)
 
