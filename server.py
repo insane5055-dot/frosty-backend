@@ -1,5 +1,5 @@
 # =========================================================
-# FINAL WORKING SERVER.PY
+# FINAL FAST WORKING SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -61,7 +61,7 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MjUwMTMzLCJpYXQiOjE3NzgxNjM3MzMsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.x-daOdl1vYeM_yG-D_fT4ZkrjgULDC-XsVZqxFF3gI3cJZTSzoj3BYtnkmbB2rQ16wun-yCfioA1j-nmMALVOg"
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
 
 HEADERS = {
     "Accept": "application/json",
@@ -122,10 +122,23 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
+    # =====================================================
+    # PREPROCESS
+    # =====================================================
+
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
+    )
+
+    # =====================================================
+    # FILTER ONLY REQUIRED EXCHANGES
+    # =====================================================
+
+    SCRIP_MASTER.dropna(
+        subset=[COL_DISPLAY],
+        inplace=True
     )
 
     print("✅ Scrip Master Loaded")
@@ -176,13 +189,25 @@ def search_symbols():
 
         contains = SCRIP_MASTER[
             SCRIP_MASTER["DISPLAY_UPPER"]
-            .str.contains(q, na=False)
+            .str.contains(
+                q,
+                na=False,
+                regex=False
+            )
         ]
 
+        # =================================================
+        # FAST CONCAT
+        # =================================================
+
         df = pd.concat([
+
             exact_match,
-            starts_with,
-            contains
+
+            starts_with.head(20),
+
+            contains.head(20)
+
         ]).drop_duplicates()
 
         # =================================================
@@ -201,7 +226,11 @@ def search_symbols():
 
         results = []
 
-        for _, r in df.head(50).iterrows():
+        # =================================================
+        # LIMIT RESULTS
+        # =================================================
+
+        for _, r in df.head(15).iterrows():
 
             instr = str(r[COL_INSTRUMENT])
 
@@ -229,7 +258,8 @@ def search_symbols():
 
             results.append({
 
-                "symbol": r[COL_DISPLAY],
+                "symbol":
+                r[COL_DISPLAY],
 
                 "ticker":
                 f"{r[COL_EXCHANGE]}:{r[COL_DISPLAY]}",
@@ -246,8 +276,6 @@ def search_symbols():
                 "type":
                 tv_type
             })
-
-        print("✅ Results:", len(results))
 
         return jsonify(results)
 
@@ -352,8 +380,6 @@ def resolve_symbol():
                 exchange_segment = "NSE_EQ"
 
             pricescale = 100
-
-            print("SEGMENT:", exchange_segment)
 
         return jsonify({
 
@@ -603,10 +629,6 @@ def history():
             return jsonify({
                 "s": "no_data"
             })
-
-        # =============================================
-        # AGGREGATION
-        # =============================================
 
         if resolution == "5":
 
