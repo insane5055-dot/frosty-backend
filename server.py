@@ -61,7 +61,7 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MjUwMTMzLCJpYXQiOjE3NzgxNjM3MzMsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.x-daOdl1vYeM_yG-D_fT4ZkrjgULDC-XsVZqxFF3gI3cJZTSzoj3BYtnkmbB2rQ16wun-yCfioA1j-nmMALVOg"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NTk5MTQyLCJpYXQiOjE3Nzg1MTI3NDIsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.3430JVFrC0533Fy7hkzWne3_JIbr9WPW9T3zrUmxTOr996hrA71lXfnWX_DbTpsP1-oyyAwJ6s6pYPYP5xEvKg"
 
 HEADERS = {
     "Accept": "application/json",
