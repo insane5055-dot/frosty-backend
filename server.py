@@ -1,5 +1,5 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
+# ULTRA FAST FINAL SERVER.PY + REALTIME TICK EMA
 # =========================================================
 
 from gevent import monkey
@@ -83,6 +83,16 @@ COL_EXCHANGE = None
 COL_INSTRUMENT = None
 
 # =========================================================
+# 🔥 REALTIME TICK EMA
+# =========================================================
+
+tick_ema = None
+
+EMA_PERIOD = 20
+
+EMA_ALPHA = 2 / (EMA_PERIOD + 1)
+
+# =========================================================
 # LOAD SCRIP MASTER
 # =========================================================
 
@@ -130,28 +140,16 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
-    # =====================================================
-    # CLEAN DATA
-    # =====================================================
-
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
-
-    # =====================================================
-    # PREPROCESS
-    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
-
-    # =====================================================
-    # FAST SEARCH CACHE
-    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -194,7 +192,7 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# ULTRA FAST SEARCH
+# SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -215,10 +213,6 @@ def search_symbols():
         starts = []
         contains = []
 
-        # =================================================
-        # FAST LOOP SEARCH
-        # =================================================
-
         for item in SEARCH_CACHE:
 
             name = item["display_upper"]
@@ -234,10 +228,6 @@ def search_symbols():
             elif q in name:
 
                 contains.append(item)
-
-        # =================================================
-        # PRIORITY RESULT
-        # =================================================
 
         final = (
             exact[:5] +
@@ -361,10 +351,6 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
-        # =================================================
-        # EXCHANGE SEGMENT
-        # =================================================
-
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
@@ -422,12 +408,6 @@ def resolve_symbol():
             pricescale,
 
             "has_intraday":
-            True,
-
-            "has_daily":
-            True,
-
-            "has_weekly_and_monthly":
             True,
 
             "supported_resolutions":
@@ -675,7 +655,7 @@ def history():
         })
 
 # =========================================================
-# LIVE WEBSOCKET
+# REALTIME CANDLE ENGINE
 # =========================================================
 
 current_candle = None
@@ -745,6 +725,28 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
+# 🔥 TICK EMA CALCULATION
+# =========================================================
+
+def calculate_tick_ema(price):
+
+    global tick_ema
+
+    if tick_ema is None:
+
+        tick_ema = price
+
+    else:
+
+        tick_ema = (
+            price * EMA_ALPHA
+        ) + (
+            tick_ema * (1 - EMA_ALPHA)
+        )
+
+    return round(tick_ema, 2)
+
+# =========================================================
 # DHAN WS
 # =========================================================
 
@@ -767,6 +769,27 @@ def start_dhan_ws():
                     message[8:12]
                 )[0],
                 2
+            )
+
+            # =====================================================
+            # 🔥 REALTIME TICK EMA
+            # =====================================================
+
+            ema_value = calculate_tick_ema(ltp)
+
+            socketio.emit(
+
+                "tick_ema",
+
+                {
+
+                    "time": int(time.time()),
+
+                    "price": ltp,
+
+                    "ema": ema_value
+
+                }
             )
 
             candle = process_tick(ltp, 0)
