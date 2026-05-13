@@ -1,9 +1,9 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY + REALTIME TICK EMA
+# ULTRA FAST FINAL SERVER.PY
 # =========================================================
 
-import eventlet
-eventlet.monkey_patch()
+from gevent import monkey
+monkey.patch_all()
 
 import os
 import json
@@ -50,15 +50,10 @@ def after_request(response):
 # =========================================================
 
 socketio = SocketIO(
-
     app,
-
     cors_allowed_origins="*",
-
-    async_mode="eventlet",
-
+    async_mode="gevent",
     ping_timeout=30,
-
     ping_interval=25
 )
 
@@ -66,16 +61,11 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NzIyNjE2LCJpYXQiOjE3Nzg2MzYyMTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.5zmxbhxu1jzWLtAQNtD2TiZ26h8HaksG4IpC61NSREj4lwyNHeVmViDCGdngTCU9UVAHtgtPgolF99r2M_idbQ"
-
-CLIENT_ID = "1101310334"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NTk5NjU2LCJpYXQiOjE3Nzg1MTMyNTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.f9xTEDB4KQDd0-Xev768CjWOJrm_9xkcK9uv0pjmYQW7eW4tP_5wLbgQlDzffYO3Kak_bRaMS-JW2FrL_M-BTA"
 
 HEADERS = {
-
     "Accept": "application/json",
-
     "Content-Type": "application/json",
-
     "access-token": ACCESS_TOKEN
 }
 
@@ -91,16 +81,6 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
-
-# =========================================================
-# 🔥 REALTIME TICK EMA
-# =========================================================
-
-tick_ema = None
-
-EMA_PERIOD = 20
-
-EMA_ALPHA = 2 / (EMA_PERIOD + 1)
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -122,14 +102,11 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
-
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
-
         low_memory=False
     )
 
     SCRIP_MASTER.columns = (
-
         SCRIP_MASTER.columns.str.upper()
     )
 
@@ -153,17 +130,28 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
+    # =====================================================
+    # CLEAN DATA
+    # =====================================================
+
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
 
-    SCRIP_MASTER["DISPLAY_UPPER"] = (
+    # =====================================================
+    # PREPROCESS
+    # =====================================================
 
+    SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
+
+    # =====================================================
+    # FAST SEARCH CACHE
+    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -206,12 +194,11 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# SEARCH
+# ULTRA FAST SEARCH
 # =========================================================
 
 @app.route("/search")
 @cross_origin()
-
 def search_symbols():
 
     try:
@@ -227,6 +214,10 @@ def search_symbols():
         exact = []
         starts = []
         contains = []
+
+        # =================================================
+        # FAST LOOP SEARCH
+        # =================================================
 
         for item in SEARCH_CACHE:
 
@@ -244,8 +235,11 @@ def search_symbols():
 
                 contains.append(item)
 
-        final = (
+        # =================================================
+        # PRIORITY RESULT
+        # =================================================
 
+        final = (
             exact[:5] +
             starts[:10] +
             contains[:10]
@@ -314,7 +308,6 @@ def search_symbols():
 
 @app.route("/resolve")
 @cross_origin()
-
 def resolve_symbol():
 
     try:
@@ -344,7 +337,6 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
-
             df[COL_DISPLAY]
             .astype(str)
             .str.upper()
@@ -368,6 +360,10 @@ def resolve_symbol():
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
+
+        # =================================================
+        # EXCHANGE SEGMENT
+        # =================================================
 
         if "INDEX" in instrument:
 
@@ -426,6 +422,12 @@ def resolve_symbol():
             pricescale,
 
             "has_intraday":
+            True,
+
+            "has_daily":
+            True,
+
+            "has_weekly_and_monthly":
             True,
 
             "supported_resolutions":
@@ -574,7 +576,6 @@ def aggregate_candles(candles, step):
 
 @app.route("/history")
 @cross_origin()
-
 def history():
 
     try:
@@ -674,7 +675,7 @@ def history():
         })
 
 # =========================================================
-# REALTIME CANDLE ENGINE
+# LIVE WEBSOCKET
 # =========================================================
 
 current_candle = None
@@ -744,28 +745,6 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
-# 🔥 TICK EMA CALCULATION
-# =========================================================
-
-def calculate_tick_ema(price):
-
-    global tick_ema
-
-    if tick_ema is None:
-
-        tick_ema = price
-
-    else:
-
-        tick_ema = (
-            price * EMA_ALPHA
-        ) + (
-            tick_ema * (1 - EMA_ALPHA)
-        )
-
-    return round(tick_ema, 2)
-
-# =========================================================
 # DHAN WS
 # =========================================================
 
@@ -783,29 +762,11 @@ def start_dhan_ws():
                 return
 
             ltp = round(
-
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
-
                 2
-            )
-
-            ema_value = calculate_tick_ema(ltp)
-
-            socketio.emit(
-
-                "tick_ema",
-
-                {
-
-                    "time": int(time.time()),
-
-                    "price": ltp,
-
-                    "ema": ema_value
-                }
             )
 
             candle = process_tick(ltp, 0)
@@ -857,7 +818,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
 
         on_message=on_message,
 
@@ -869,9 +830,7 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
-
         ping_interval=20,
-
         ping_timeout=10
     )
 
@@ -901,10 +860,7 @@ if __name__ == "__main__":
     )
 
     socketio.run(
-
         app,
-
         host="0.0.0.0",
-
         port=port
     )
