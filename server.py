@@ -1,9 +1,9 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY + REALTIME TICK EMA
+# 🔥 ULTRA FAST FINAL SERVER.PY + REALTIME TICK EMA
 # =========================================================
 
-from gevent import monkey
-monkey.patch_all()
+import eventlet
+eventlet.monkey_patch()
 
 import os
 import json
@@ -50,10 +50,15 @@ def after_request(response):
 # =========================================================
 
 socketio = SocketIO(
+
     app,
+
     cors_allowed_origins="*",
-    async_mode="gevent",
+
+    async_mode="eventlet",
+
     ping_timeout=30,
+
     ping_interval=25
 )
 
@@ -61,11 +66,16 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NzIyNjE2LCJpYXQiOjE3Nzg2MzYyMTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.5zmxbhxu1jzWLtAQNtD2TiZ26h8HaksG4IpC61NSREj4lwyNHeVmViDCGdngTCU9UVAHtgtPgolF99r2M_idbQ"
+ACCESS_TOKEN = "YOUR_DHAN_ACCESS_TOKEN"
+
+CLIENT_ID = "YOUR_CLIENT_ID"
 
 HEADERS = {
+
     "Accept": "application/json",
+
     "Content-Type": "application/json",
+
     "access-token": ACCESS_TOKEN
 }
 
@@ -112,7 +122,9 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
+
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+
         low_memory=False
     )
 
@@ -146,8 +158,11 @@ def load_scrip_master():
     )
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
+
         SCRIP_MASTER[COL_DISPLAY]
+
         .astype(str)
+
         .str.upper()
     )
 
@@ -156,6 +171,7 @@ def load_scrip_master():
         exchange = str(row[COL_EXCHANGE])
 
         if exchange not in [
+
             "NSE",
             "BSE",
             "NSE_FNO",
@@ -230,8 +246,11 @@ def search_symbols():
                 contains.append(item)
 
         final = (
+
             exact[:5] +
+
             starts[:10] +
+
             contains[:10]
         )
 
@@ -246,6 +265,7 @@ def search_symbols():
                 tv_type = "index"
 
             elif instr in [
+
                 "FUTIDX",
                 "FUTSTK"
             ]:
@@ -253,6 +273,7 @@ def search_symbols():
                 tv_type = "futures"
 
             elif instr in [
+
                 "OPTIDX",
                 "OPTSTK"
             ]:
@@ -327,9 +348,13 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
+
             df[COL_DISPLAY]
+
             .astype(str)
+
             .str.upper()
+
             .str.replace(" ", "")
         )
 
@@ -357,6 +382,7 @@ def resolve_symbol():
             pricescale = 1
 
         elif instrument in [
+
             "OPTIDX",
             "FUTIDX",
             "OPTSTK",
@@ -439,6 +465,7 @@ def resolve_symbol():
 # =========================================================
 
 def get_intraday_ohlc(
+
     security_id,
     exchange,
     instrument,
@@ -466,9 +493,13 @@ def get_intraday_ohlc(
     }
 
     r = requests.post(
+
         url,
+
         headers=HEADERS,
+
         json=payload,
+
         timeout=20
     )
 
@@ -589,6 +620,7 @@ def history():
         )
 
         candles_1m = get_intraday_ohlc(
+
             security_id,
             exchange,
             instrument,
@@ -655,77 +687,7 @@ def history():
         })
 
 # =========================================================
-# REALTIME CANDLE ENGINE
-# =========================================================
-
-current_candle = None
-
-def process_tick(price, volume):
-
-    global current_candle
-
-    ts = int(time.time())
-
-    minute = ts // 60
-
-    if current_candle is None:
-
-        current_candle = {
-
-            "minute": minute,
-
-            "open": price,
-
-            "high": price,
-
-            "low": price,
-
-            "close": price,
-
-            "volume": volume
-        }
-
-        return None
-
-    if minute == current_candle["minute"]:
-
-        current_candle["high"] = max(
-            current_candle["high"],
-            price
-        )
-
-        current_candle["low"] = min(
-            current_candle["low"],
-            price
-        )
-
-        current_candle["close"] = price
-
-        current_candle["volume"] += volume
-
-        return current_candle
-
-    finished = current_candle
-
-    current_candle = {
-
-        "minute": minute,
-
-        "open": price,
-
-        "high": price,
-
-        "low": price,
-
-        "close": price,
-
-        "volume": volume
-    }
-
-    return finished
-
-# =========================================================
-# 🔥 TICK EMA CALCULATION
+# REALTIME TICK EMA
 # =========================================================
 
 def calculate_tick_ema(price):
@@ -739,8 +701,11 @@ def calculate_tick_ema(price):
     else:
 
         tick_ema = (
+
             price * EMA_ALPHA
+
         ) + (
+
             tick_ema * (1 - EMA_ALPHA)
         )
 
@@ -764,18 +729,24 @@ def start_dhan_ws():
                 return
 
             ltp = round(
+
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
+
                 2
             )
 
-            # =====================================================
-            # 🔥 REALTIME TICK EMA
-            # =====================================================
+            # =============================================
+            # EMA CALCULATION
+            # =============================================
 
             ema_value = calculate_tick_ema(ltp)
+
+            # =============================================
+            # EMIT EMA
+            # =============================================
 
             socketio.emit(
 
@@ -788,22 +759,12 @@ def start_dhan_ws():
                     "price": ltp,
 
                     "ema": ema_value
-
                 }
             )
 
-            candle = process_tick(ltp, 0)
-
-            if candle:
-
-                socketio.emit(
-                    "candle",
-                    candle
-                )
-
         except Exception as e:
 
-            print("❌ WS DECODE ERROR:", e)
+            print("❌ WS ERROR:", e)
 
     def on_open(ws):
 
@@ -816,8 +777,10 @@ def start_dhan_ws():
             "InstrumentCount": 1,
 
             "InstrumentList": [
+
                 {
                     "ExchangeSegment": "IDX_I",
+
                     "SecurityId": "13"
                 }
             ]
@@ -841,7 +804,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
 
         on_message=on_message,
 
@@ -853,7 +816,9 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
+
         ping_interval=20,
+
         ping_timeout=10
     )
 
@@ -864,7 +829,9 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
+
         target=start_dhan_ws,
+
         daemon=True
     ).start()
 
@@ -883,7 +850,10 @@ if __name__ == "__main__":
     )
 
     socketio.run(
+
         app,
+
         host="0.0.0.0",
+
         port=port
     )
