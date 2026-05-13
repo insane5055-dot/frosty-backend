@@ -27,21 +27,39 @@ from flask_socketio import SocketIO
 
 app = Flask(__name__)
 
+app.config["CORS_HEADERS"] = "Content-Type"
+
 # =========================================================
 # CORS
 # =========================================================
 
 CORS(
     app,
-    resources={r"/*": {"origins": "*"}}
+    resources={
+        r"/*": {
+            "origins": "*"
+        }
+    },
+    supports_credentials=True
 )
 
 @app.after_request
 def after_request(response):
 
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers.add(
+        "Access-Control-Allow-Origin",
+        "*"
+    )
+
+    response.headers.add(
+        "Access-Control-Allow-Headers",
+        "Content-Type,Authorization"
+    )
+
+    response.headers.add(
+        "Access-Control-Allow-Methods",
+        "GET,POST,OPTIONS"
+    )
 
     return response
 
@@ -130,28 +148,16 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
-    # =====================================================
-    # CLEAN DATA
-    # =====================================================
-
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
-
-    # =====================================================
-    # PREPROCESS
-    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
-
-    # =====================================================
-    # FAST SEARCH CACHE
-    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -194,7 +200,7 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# ULTRA FAST SEARCH
+# SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -202,6 +208,8 @@ def home():
 def search_symbols():
 
     try:
+
+        load_scrip_master()
 
         q = request.args.get(
             "q",
@@ -214,10 +222,6 @@ def search_symbols():
         exact = []
         starts = []
         contains = []
-
-        # =================================================
-        # FAST LOOP SEARCH
-        # =================================================
 
         for item in SEARCH_CACHE:
 
@@ -234,10 +238,6 @@ def search_symbols():
             elif q in name:
 
                 contains.append(item)
-
-        # =================================================
-        # PRIORITY RESULT
-        # =================================================
 
         final = (
             exact[:5] +
@@ -360,10 +360,6 @@ def resolve_symbol():
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
-
-        # =================================================
-        # EXCHANGE SEGMENT
-        # =================================================
 
         if "INDEX" in instrument:
 
@@ -846,14 +842,16 @@ def start_ws_thread():
     ).start()
 
 # =========================================================
+# START DHAN WS
+# =========================================================
+
+start_ws_thread()
+
+# =========================================================
 # MAIN
 # =========================================================
 
 if __name__ == "__main__":
-
-    load_scrip_master()
-
-    start_ws_thread()
 
     port = int(
         os.environ.get("PORT", 5000)
