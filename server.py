@@ -63,6 +63,8 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NzIyNjE2LCJpYXQiOjE3Nzg2MzYyMTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.5zmxbhxu1jzWLtAQNtD2TiZ26h8HaksG4IpC61NSREj4lwyNHeVmViDCGdngTCU9UVAHtgtPgolF99r2M_idbQ"
 
+CLIENT_ID = "1101310334"
+
 HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
@@ -81,6 +83,16 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
+
+# =========================================================
+# REALTIME TICK EMA
+# =========================================================
+
+EMA_PERIOD = 20
+
+ema_multiplier = 2 / (EMA_PERIOD + 1)
+
+tick_ema = None
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -130,28 +142,16 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
-    # =====================================================
-    # CLEAN DATA
-    # =====================================================
-
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
-
-    # =====================================================
-    # PREPROCESS
-    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
-
-    # =====================================================
-    # FAST SEARCH CACHE
-    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -194,7 +194,7 @@ def home():
     return "Backend running OK"
 
 # =========================================================
-# ULTRA FAST SEARCH
+# SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -215,10 +215,6 @@ def search_symbols():
         starts = []
         contains = []
 
-        # =================================================
-        # FAST LOOP SEARCH
-        # =================================================
-
         for item in SEARCH_CACHE:
 
             name = item["display_upper"]
@@ -234,10 +230,6 @@ def search_symbols():
             elif q in name:
 
                 contains.append(item)
-
-        # =================================================
-        # PRIORITY RESULT
-        # =================================================
 
         final = (
             exact[:5] +
@@ -360,10 +352,6 @@ def resolve_symbol():
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
-
-        # =================================================
-        # EXCHANGE SEGMENT
-        # =================================================
 
         if "INDEX" in instrument:
 
@@ -675,7 +663,28 @@ def history():
         })
 
 # =========================================================
-# LIVE WEBSOCKET
+# TICK EMA CALCULATOR
+# =========================================================
+
+def calculate_tick_ema(price):
+
+    global tick_ema
+
+    if tick_ema is None:
+
+        tick_ema = price
+
+    else:
+
+        tick_ema = (
+            (price - tick_ema)
+            * ema_multiplier
+        ) + tick_ema
+
+    return round(tick_ema, 2)
+
+# =========================================================
+# LIVE CANDLE ENGINE
 # =========================================================
 
 current_candle = None
@@ -769,6 +778,25 @@ def start_dhan_ws():
                 2
             )
 
+            # =================================================
+            # REALTIME EMA
+            # =================================================
+
+            ema_value = calculate_tick_ema(ltp)
+
+            socketio.emit("tick_ema", {
+
+                "time": int(time.time()),
+
+                "price": ltp,
+
+                "ema": ema_value
+            })
+
+            # =================================================
+            # LIVE CANDLE
+            # =================================================
+
             candle = process_tick(ltp, 0)
 
             if candle:
@@ -818,7 +846,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
 
         on_message=on_message,
 
