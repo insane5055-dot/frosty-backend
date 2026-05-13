@@ -31,10 +31,7 @@ app = Flask(__name__)
 # CORS
 # =========================================================
 
-CORS(
-    app,
-    resources={r"/*": {"origins": "*"}}
-)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # =========================================================
 # SOCKET.IO
@@ -363,7 +360,7 @@ def resolve_symbol():
         instrument = str(row[COL_INSTRUMENT])
 
         # =================================================
-        # TV TYPE
+        # TV TYPE + EXCHANGE SEGMENT
         # =================================================
 
         if "INDEX" in instrument:
@@ -473,12 +470,12 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
-# FETCH INTRADAY
+# FETCH INTRADAY DATA
 # =========================================================
 
 def get_intraday_ohlc(
     security_id,
-    exchange,
+    exchange_segment,
     instrument,
     from_date,
     to_date
@@ -490,7 +487,7 @@ def get_intraday_ohlc(
 
         "securityId": str(security_id),
 
-        "exchangeSegment": exchange,
+        "exchangeSegment": exchange_segment,
 
         "instrument": instrument,
 
@@ -510,6 +507,8 @@ def get_intraday_ohlc(
         timeout=20
     )
 
+    print("📡 DHAN STATUS:", r.status_code)
+
     if r.status_code != 200:
 
         print("❌ DHAN ERROR:", r.text)
@@ -519,6 +518,9 @@ def get_intraday_ohlc(
     res = r.json()
 
     if "open" not in res:
+
+        print("❌ NO OPEN DATA")
+
         return []
 
     data = []
@@ -542,7 +544,9 @@ def get_intraday_ohlc(
 
             "close": float(res["close"][i]),
 
-            "volume": int(res.get("volume", [0])[i])
+            "volume": int(
+                res.get("volume", [0])[i]
+            )
         })
 
     return sorted(
@@ -597,24 +601,126 @@ def history():
 
     try:
 
-        security_id = request.args.get("security_id")
-        exchange = request.args.get("exchange_segment")
-        instrument = request.args.get("instrument")
+        load_scrip_master()
+
+        symbol = request.args.get(
+            "symbol",
+            ""
+        )
 
         resolution = request.args.get(
             "resolution",
             "1"
         )
 
-        from_ts = int(request.args.get("from"))
-        to_ts = int(request.args.get("to"))
+        from_ts = int(
+            request.args.get("from")
+        )
 
-        ist = pytz.timezone("Asia/Kolkata")
+        to_ts = int(
+            request.args.get("to")
+        )
 
-        from_dt = datetime.fromtimestamp(
-            from_ts,
-            tz=ist
-        ) - timedelta(days=5)
+        print("📊 HISTORY SYMBOL:", symbol)
+
+        # =================================================
+        # SPLIT SYMBOL
+        # =================================================
+
+        if ":" in symbol:
+
+            exch, sym = symbol.split(":", 1)
+
+        else:
+
+            exch = "NSE"
+            sym = symbol
+
+        sym_clean = (
+            sym.upper()
+            .replace(" ", "")
+        )
+
+        df = SCRIP_MASTER.copy()
+
+        df["MATCH"] = (
+
+            df[COL_DISPLAY]
+            .astype(str)
+            .str.upper()
+            .str.replace(" ", "")
+        )
+
+        row = df[
+            df["MATCH"] == sym_clean
+        ]
+
+        if exch:
+
+            row = row[
+                row[COL_EXCHANGE] == exch
+            ]
+
+        if row.empty:
+
+            print("❌ SYMBOL NOT FOUND")
+
+            return jsonify({
+                "s": "no_data"
+            })
+
+        row = row.iloc[0]
+
+        instrument = str(
+            row[COL_INSTRUMENT]
+        )
+
+        # =================================================
+        # EXCHANGE SEGMENT
+        # =================================================
+
+        if "INDEX" in instrument:
+
+            exchange_segment = "IDX_I"
+
+        elif instrument in [
+
+            "OPTIDX",
+            "FUTIDX",
+            "OPTSTK",
+            "FUTSTK"
+        ]:
+
+            exchange_segment = "NSE_FNO"
+
+        else:
+
+            if exch == "BSE":
+
+                exchange_segment = "BSE_EQ"
+
+            else:
+
+                exchange_segment = "NSE_EQ"
+
+        security_id = str(
+            row[COL_SECURITY]
+        )
+
+        # =================================================
+        # DATE FORMAT
+        # =================================================
+
+        ist = pytz.timezone(
+            "Asia/Kolkata"
+        )
+
+        from_dt = (
+            datetime.fromtimestamp(
+                from_ts,
+                tz=ist
+            ) - timedelta(days=5)
+        )
 
         to_dt = datetime.fromtimestamp(
             to_ts,
@@ -629,19 +735,33 @@ def history():
             "%Y-%m-%d %H:%M:%S"
         )
 
+        print("📅 FROM:", from_date)
+        print("📅 TO:", to_date)
+
+        # =================================================
+        # FETCH DATA
+        # =================================================
+
         candles_1m = get_intraday_ohlc(
+
             security_id,
-            exchange,
+            exchange_segment,
             instrument,
             from_date,
             to_date
         )
+
+        print("📦 CANDLES:", len(candles_1m))
 
         if not candles_1m:
 
             return jsonify({
                 "s": "no_data"
             })
+
+        # =================================================
+        # RESOLUTION
+        # =================================================
 
         if resolution == "5":
 
@@ -766,7 +886,7 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
-# DHAN WEBSOCKET
+# DHAN WS
 # =========================================================
 
 def start_dhan_ws():
@@ -792,7 +912,10 @@ def start_dhan_ws():
                 2
             )
 
-            candle = process_tick(ltp, 0)
+            candle = process_tick(
+                ltp,
+                0
+            )
 
             if candle:
 
@@ -803,7 +926,7 @@ def start_dhan_ws():
 
         except Exception as e:
 
-            print("❌ WS DECODE ERROR:", e)
+            print("❌ WS ERROR:", e)
 
     def on_open(ws):
 
@@ -825,15 +948,17 @@ def start_dhan_ws():
 
         time.sleep(1)
 
-        ws.send(json.dumps(subscribe))
+        ws.send(
+            json.dumps(subscribe)
+        )
 
     def on_error(ws, error):
 
-        print("❌ DHAN WS ERROR:", error)
+        print("❌ WS ERROR:", error)
 
     def on_close(ws, a, b):
 
-        print("❌ DHAN WS CLOSED")
+        print("❌ WS CLOSED")
 
         time.sleep(5)
 
@@ -858,7 +983,7 @@ def start_dhan_ws():
     )
 
 # =========================================================
-# START WS THREAD
+# START THREAD
 # =========================================================
 
 def start_ws_thread():
@@ -883,7 +1008,10 @@ if __name__ == "__main__":
     )
 
     socketio.run(
+
         app,
+
         host="0.0.0.0",
+
         port=port
     )
