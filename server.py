@@ -1,5 +1,5 @@
 # =========================================================
-# 🔥 ULTRA FAST FINAL SERVER.PY + REALTIME TICK EMA
+# ULTRA FAST FINAL SERVER.PY + REALTIME TICK EMA
 # =========================================================
 
 import eventlet
@@ -66,9 +66,9 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "YOUR_DHAN_ACCESS_TOKEN"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NzIyNjE2LCJpYXQiOjE3Nzg2MzYyMTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.5zmxbhxu1jzWLtAQNtD2TiZ26h8HaksG4IpC61NSREj4lwyNHeVmViDCGdngTCU9UVAHtgtPgolF99r2M_idbQ"
 
-CLIENT_ID = "YOUR_CLIENT_ID"
+CLIENT_ID = "1101310334"
 
 HEADERS = {
 
@@ -129,6 +129,7 @@ def load_scrip_master():
     )
 
     SCRIP_MASTER.columns = (
+
         SCRIP_MASTER.columns.str.upper()
     )
 
@@ -160,9 +161,7 @@ def load_scrip_master():
     SCRIP_MASTER["DISPLAY_UPPER"] = (
 
         SCRIP_MASTER[COL_DISPLAY]
-
         .astype(str)
-
         .str.upper()
     )
 
@@ -171,7 +170,6 @@ def load_scrip_master():
         exchange = str(row[COL_EXCHANGE])
 
         if exchange not in [
-
             "NSE",
             "BSE",
             "NSE_FNO",
@@ -213,6 +211,7 @@ def home():
 
 @app.route("/search")
 @cross_origin()
+
 def search_symbols():
 
     try:
@@ -248,9 +247,7 @@ def search_symbols():
         final = (
 
             exact[:5] +
-
             starts[:10] +
-
             contains[:10]
         )
 
@@ -265,7 +262,6 @@ def search_symbols():
                 tv_type = "index"
 
             elif instr in [
-
                 "FUTIDX",
                 "FUTSTK"
             ]:
@@ -273,7 +269,6 @@ def search_symbols():
                 tv_type = "futures"
 
             elif instr in [
-
                 "OPTIDX",
                 "OPTSTK"
             ]:
@@ -319,6 +314,7 @@ def search_symbols():
 
 @app.route("/resolve")
 @cross_origin()
+
 def resolve_symbol():
 
     try:
@@ -350,11 +346,8 @@ def resolve_symbol():
         df["MATCH"] = (
 
             df[COL_DISPLAY]
-
             .astype(str)
-
             .str.upper()
-
             .str.replace(" ", "")
         )
 
@@ -382,7 +375,6 @@ def resolve_symbol():
             pricescale = 1
 
         elif instrument in [
-
             "OPTIDX",
             "FUTIDX",
             "OPTSTK",
@@ -465,7 +457,6 @@ def resolve_symbol():
 # =========================================================
 
 def get_intraday_ohlc(
-
     security_id,
     exchange,
     instrument,
@@ -493,13 +484,9 @@ def get_intraday_ohlc(
     }
 
     r = requests.post(
-
         url,
-
         headers=HEADERS,
-
         json=payload,
-
         timeout=20
     )
 
@@ -587,6 +574,7 @@ def aggregate_candles(candles, step):
 
 @app.route("/history")
 @cross_origin()
+
 def history():
 
     try:
@@ -620,7 +608,6 @@ def history():
         )
 
         candles_1m = get_intraday_ohlc(
-
             security_id,
             exchange,
             instrument,
@@ -687,7 +674,77 @@ def history():
         })
 
 # =========================================================
-# REALTIME TICK EMA
+# REALTIME CANDLE ENGINE
+# =========================================================
+
+current_candle = None
+
+def process_tick(price, volume):
+
+    global current_candle
+
+    ts = int(time.time())
+
+    minute = ts // 60
+
+    if current_candle is None:
+
+        current_candle = {
+
+            "minute": minute,
+
+            "open": price,
+
+            "high": price,
+
+            "low": price,
+
+            "close": price,
+
+            "volume": volume
+        }
+
+        return None
+
+    if minute == current_candle["minute"]:
+
+        current_candle["high"] = max(
+            current_candle["high"],
+            price
+        )
+
+        current_candle["low"] = min(
+            current_candle["low"],
+            price
+        )
+
+        current_candle["close"] = price
+
+        current_candle["volume"] += volume
+
+        return current_candle
+
+    finished = current_candle
+
+    current_candle = {
+
+        "minute": minute,
+
+        "open": price,
+
+        "high": price,
+
+        "low": price,
+
+        "close": price,
+
+        "volume": volume
+    }
+
+    return finished
+
+# =========================================================
+# 🔥 TICK EMA CALCULATION
 # =========================================================
 
 def calculate_tick_ema(price):
@@ -701,11 +758,8 @@ def calculate_tick_ema(price):
     else:
 
         tick_ema = (
-
             price * EMA_ALPHA
-
         ) + (
-
             tick_ema * (1 - EMA_ALPHA)
         )
 
@@ -738,15 +792,7 @@ def start_dhan_ws():
                 2
             )
 
-            # =============================================
-            # EMA CALCULATION
-            # =============================================
-
             ema_value = calculate_tick_ema(ltp)
-
-            # =============================================
-            # EMIT EMA
-            # =============================================
 
             socketio.emit(
 
@@ -762,9 +808,18 @@ def start_dhan_ws():
                 }
             )
 
+            candle = process_tick(ltp, 0)
+
+            if candle:
+
+                socketio.emit(
+                    "candle",
+                    candle
+                )
+
         except Exception as e:
 
-            print("❌ WS ERROR:", e)
+            print("❌ WS DECODE ERROR:", e)
 
     def on_open(ws):
 
@@ -777,10 +832,8 @@ def start_dhan_ws():
             "InstrumentCount": 1,
 
             "InstrumentList": [
-
                 {
                     "ExchangeSegment": "IDX_I",
-
                     "SecurityId": "13"
                 }
             ]
@@ -829,9 +882,7 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
-
         target=start_dhan_ws,
-
         daemon=True
     ).start()
 
