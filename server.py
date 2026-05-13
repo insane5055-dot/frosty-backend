@@ -1,6 +1,5 @@
 # =========================================================
-# ULTRA FAST FROSTY SERVER.PY
-# REALTIME TICK EMA + SOCKET.IO
+# ULTRA FAST FINAL SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -41,9 +40,7 @@ CORS(
 def after_request(response):
 
     response.headers["Access-Control-Allow-Origin"] = "*"
-
     response.headers["Access-Control-Allow-Headers"] = "*"
-
     response.headers["Access-Control-Allow-Methods"] = "*"
 
     return response
@@ -53,22 +50,11 @@ def after_request(response):
 # =========================================================
 
 socketio = SocketIO(
-
     app,
-
     cors_allowed_origins="*",
-
     async_mode="gevent",
-
     ping_timeout=30,
-
-    ping_interval=25,
-
-    transports=["websocket"],
-
-    logger=False,
-
-    engineio_logger=False
+    ping_interval=25
 )
 
 # =========================================================
@@ -77,14 +63,9 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4NzIyNjE2LCJpYXQiOjE3Nzg2MzYyMTYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.5zmxbhxu1jzWLtAQNtD2TiZ26h8HaksG4IpC61NSREj4lwyNHeVmViDCGdngTCU9UVAHtgtPgolF99r2M_idbQ"
 
-CLIENT_ID = "1101310334"
-
 HEADERS = {
-
     "Accept": "application/json",
-
     "Content-Type": "application/json",
-
     "access-token": ACCESS_TOKEN
 }
 
@@ -100,22 +81,6 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
-
-# =========================================================
-# EMA GLOBALS
-# =========================================================
-
-EMA_PERIOD = 20
-
-EMA_MULTIPLIER = 2 / (EMA_PERIOD + 1)
-
-tick_ema = None
-
-# =========================================================
-# LIVE CANDLE
-# =========================================================
-
-current_candle = None
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -137,9 +102,7 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
-
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
-
         low_memory=False
     )
 
@@ -168,7 +131,7 @@ def load_scrip_master():
     )
 
     # =====================================================
-    # CLEAN
+    # CLEAN DATA
     # =====================================================
 
     SCRIP_MASTER.dropna(
@@ -181,16 +144,13 @@ def load_scrip_master():
     # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
-
         SCRIP_MASTER[COL_DISPLAY]
-
         .astype(str)
-
         .str.upper()
     )
 
     # =====================================================
-    # SEARCH CACHE
+    # FAST SEARCH CACHE
     # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
@@ -231,15 +191,10 @@ def load_scrip_master():
 @app.route("/")
 def home():
 
-    return jsonify({
-
-        "status": "running",
-
-        "message": "Frosty Backend Running"
-    })
+    return "Backend running OK"
 
 # =========================================================
-# SEARCH
+# ULTRA FAST SEARCH
 # =========================================================
 
 @app.route("/search")
@@ -260,6 +215,10 @@ def search_symbols():
         starts = []
         contains = []
 
+        # =================================================
+        # FAST LOOP SEARCH
+        # =================================================
+
         for item in SEARCH_CACHE:
 
             name = item["display_upper"]
@@ -276,12 +235,13 @@ def search_symbols():
 
                 contains.append(item)
 
+        # =================================================
+        # PRIORITY RESULT
+        # =================================================
+
         final = (
-
             exact[:5] +
-
             starts[:10] +
-
             contains[:10]
         )
 
@@ -377,13 +337,9 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
-
             df[COL_DISPLAY]
-
             .astype(str)
-
             .str.upper()
-
             .str.replace(" ", "")
         )
 
@@ -412,7 +368,6 @@ def resolve_symbol():
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
-
             pricescale = 1
 
         elif instrument in [
@@ -423,7 +378,6 @@ def resolve_symbol():
         ]:
 
             exchange_segment = "NSE_FNO"
-
             pricescale = 100
 
         else:
@@ -501,6 +455,122 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
+# FETCH INTRADAY
+# =========================================================
+
+def get_intraday_ohlc(
+    security_id,
+    exchange,
+    instrument,
+    from_date,
+    to_date
+):
+
+    url = "https://api.dhan.co/v2/charts/intraday"
+
+    payload = {
+
+        "securityId": str(security_id),
+
+        "exchangeSegment": exchange,
+
+        "instrument": instrument,
+
+        "interval": "1",
+
+        "oi": False,
+
+        "fromDate": from_date,
+
+        "toDate": to_date
+    }
+
+    r = requests.post(
+        url,
+        headers=HEADERS,
+        json=payload,
+        timeout=20
+    )
+
+    if r.status_code != 200:
+
+        print("❌ DHAN ERROR:", r.text)
+
+        return []
+
+    res = r.json()
+
+    if "open" not in res:
+        return []
+
+    data = []
+
+    for i in range(len(res["open"])):
+
+        ts = int(res["timestamp"][i])
+
+        if len(str(ts)) == 13:
+            ts //= 1000
+
+        data.append({
+
+            "time": ts,
+
+            "open": res["open"][i],
+
+            "high": res["high"][i],
+
+            "low": res["low"][i],
+
+            "close": res["close"][i],
+
+            "volume": res.get("volume", [0])[i]
+        })
+
+    return sorted(
+        data,
+        key=lambda x: x["time"]
+    )
+
+# =========================================================
+# AGGREGATE
+# =========================================================
+
+def aggregate_candles(candles, step):
+
+    out = []
+
+    for i in range(0, len(candles), step):
+
+        chunk = candles[i:i + step]
+
+        if len(chunk) < step:
+            continue
+
+        out.append({
+
+            "time": chunk[0]["time"],
+
+            "open": chunk[0]["open"],
+
+            "high": max(
+                c["high"] for c in chunk
+            ),
+
+            "low": min(
+                c["low"] for c in chunk
+            ),
+
+            "close": chunk[-1]["close"],
+
+            "volume": sum(
+                c["volume"] for c in chunk
+            )
+        })
+
+    return out
+
+# =========================================================
 # HISTORY
 # =========================================================
 
@@ -511,15 +581,11 @@ def history():
     try:
 
         security_id = request.args.get("security_id")
-
         exchange = request.args.get("exchange")
-
         instrument = request.args.get("instrument")
-
         resolution = request.args.get("resolution", "1")
 
         from_ts = int(request.args.get("from"))
-
         to_ts = int(request.args.get("to"))
 
         ist = pytz.timezone("Asia/Kolkata")
@@ -542,80 +608,37 @@ def history():
             "%Y-%m-%d %H:%M:%S"
         )
 
-        url = "https://api.dhan.co/v2/charts/intraday"
-
-        payload = {
-
-            "securityId": str(security_id),
-
-            "exchangeSegment": exchange,
-
-            "instrument": instrument,
-
-            "interval": "1",
-
-            "oi": False,
-
-            "fromDate": from_date,
-
-            "toDate": to_date
-        }
-
-        r = requests.post(
-
-            url,
-
-            headers=HEADERS,
-
-            json=payload,
-
-            timeout=20
+        candles_1m = get_intraday_ohlc(
+            security_id,
+            exchange,
+            instrument,
+            from_date,
+            to_date
         )
 
-        if r.status_code != 200:
-
-            print("❌ DHAN ERROR:", r.text)
+        if not candles_1m:
 
             return jsonify({
                 "s": "no_data"
             })
 
-        res = r.json()
+        if resolution == "5":
 
-        if "open" not in res:
+            candles = aggregate_candles(
+                candles_1m,
+                5
+            )
 
-            return jsonify({
-                "s": "no_data"
-            })
+        elif resolution == "15":
 
-        candles = []
+            candles = aggregate_candles(
+                candles_1m,
+                15
+            )
 
-        for i in range(len(res["open"])):
+        else:
 
-            ts = int(res["timestamp"][i])
-
-            if len(str(ts)) == 13:
-                ts //= 1000
-
-            candles.append({
-
-                "time": ts,
-
-                "open": res["open"][i],
-
-                "high": res["high"][i],
-
-                "low": res["low"][i],
-
-                "close": res["close"][i],
-
-                "volume": res.get("volume", [0])[i]
-            })
-
-        candles = sorted(
-            candles,
-            key=lambda x: x["time"]
-        )
+            candles = candles_1m
 
         return jsonify({
 
@@ -652,32 +675,10 @@ def history():
         })
 
 # =========================================================
-# TICK EMA
+# LIVE WEBSOCKET
 # =========================================================
 
-def calculate_tick_ema(price):
-
-    global tick_ema
-
-    if tick_ema is None:
-
-        tick_ema = price
-
-    else:
-
-        tick_ema = (
-
-            (price - tick_ema)
-
-            * EMA_MULTIPLIER
-
-        ) + tick_ema
-
-    return round(tick_ema, 2)
-
-# =========================================================
-# PROCESS TICK
-# =========================================================
+current_candle = None
 
 def process_tick(price, volume):
 
@@ -744,21 +745,7 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
-# SOCKET EVENTS
-# =========================================================
-
-@socketio.on("connect")
-def handle_connect():
-
-    print("🟢 Frontend Connected")
-
-@socketio.on("disconnect")
-def handle_disconnect():
-
-    print("🔴 Frontend Disconnected")
-
-# =========================================================
-# DHAN WEBSOCKET
+# DHAN WS
 # =========================================================
 
 def start_dhan_ws():
@@ -774,43 +761,13 @@ def start_dhan_ws():
             if packet_type != 2:
                 return
 
-            # =================================================
-            # LTP
-            # =================================================
-
             ltp = round(
-
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
-
                 2
             )
-
-            # =================================================
-            # EMA
-            # =================================================
-
-            ema_value = calculate_tick_ema(ltp)
-
-            socketio.emit(
-
-                "tick_ema",
-
-                {
-
-                    "time": int(time.time()),
-
-                    "price": ltp,
-
-                    "ema": ema_value
-                }
-            )
-
-            # =================================================
-            # LIVE CANDLE
-            # =================================================
 
             candle = process_tick(ltp, 0)
 
@@ -836,10 +793,8 @@ def start_dhan_ws():
             "InstrumentCount": 1,
 
             "InstrumentList": [
-
                 {
                     "ExchangeSegment": "IDX_I",
-
                     "SecurityId": "13"
                 }
             ]
@@ -863,7 +818,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
 
         on_message=on_message,
 
@@ -875,9 +830,7 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
-
         ping_interval=20,
-
         ping_timeout=10
     )
 
@@ -888,9 +841,7 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
-
         target=start_dhan_ws,
-
         daemon=True
     ).start()
 
@@ -908,17 +859,8 @@ if __name__ == "__main__":
         os.environ.get("PORT", 5000)
     )
 
-    print(f"🚀 Server Running On Port {port}")
-
     socketio.run(
-
         app,
-
         host="0.0.0.0",
-
-        port=port,
-
-        debug=False,
-
-        use_reloader=False
+        port=port
     )
