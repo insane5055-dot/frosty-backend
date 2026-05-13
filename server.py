@@ -83,6 +83,16 @@ COL_EXCHANGE = None
 COL_INSTRUMENT = None
 
 # =========================================================
+# TICK EMA
+# =========================================================
+
+EMA_PERIOD = 20
+
+tick_ema = None
+
+last_price = None
+
+# =========================================================
 # LOAD SCRIP MASTER
 # =========================================================
 
@@ -680,6 +690,32 @@ def history():
 
 current_candle = None
 
+# =========================================================
+# EMA CALCULATION
+# =========================================================
+
+def calculate_tick_ema(price):
+
+    global tick_ema
+
+    multiplier = 2 / (EMA_PERIOD + 1)
+
+    if tick_ema is None:
+
+        tick_ema = price
+
+    else:
+
+        tick_ema = (
+            (price - tick_ema) * multiplier
+        ) + tick_ema
+
+    return round(tick_ema, 2)
+
+# =========================================================
+# PROCESS TICK
+# =========================================================
+
 def process_tick(price, volume):
 
     global current_candle
@@ -767,6 +803,24 @@ def start_dhan_ws():
                     message[8:12]
                 )[0],
                 2
+            )
+
+            # =================================================
+            # LIVE EMA
+            # =================================================
+
+            global last_price
+
+            last_price = ltp
+
+            ema_value = calculate_tick_ema(ltp)
+
+            socketio.emit(
+                "tick_ema",
+                {
+                    "price": ltp,
+                    "ema": ema_value
+                }
             )
 
             candle = process_tick(ltp, 0)
