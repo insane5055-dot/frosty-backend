@@ -83,16 +83,6 @@ COL_EXCHANGE = None
 COL_INSTRUMENT = None
 
 # =========================================================
-# TICK EMA
-# =========================================================
-
-EMA_PERIOD = 20
-
-tick_ema = None
-
-last_price = None
-
-# =========================================================
 # LOAD SCRIP MASTER
 # =========================================================
 
@@ -690,32 +680,6 @@ def history():
 
 current_candle = None
 
-# =========================================================
-# EMA CALCULATION
-# =========================================================
-
-def calculate_tick_ema(price):
-
-    global tick_ema
-
-    multiplier = 2 / (EMA_PERIOD + 1)
-
-    if tick_ema is None:
-
-        tick_ema = price
-
-    else:
-
-        tick_ema = (
-            (price - tick_ema) * multiplier
-        ) + tick_ema
-
-    return round(tick_ema, 2)
-
-# =========================================================
-# PROCESS TICK
-# =========================================================
-
 def process_tick(price, volume):
 
     global current_candle
@@ -805,24 +769,6 @@ def start_dhan_ws():
                 2
             )
 
-            # =================================================
-            # LIVE EMA
-            # =================================================
-
-            global last_price
-
-            last_price = ltp
-
-            ema_value = calculate_tick_ema(ltp)
-
-            socketio.emit(
-                "tick_ema",
-                {
-                    "price": ltp,
-                    "ema": ema_value
-                }
-            )
-
             candle = process_tick(ltp, 0)
 
             if candle:
@@ -889,16 +835,25 @@ def start_dhan_ws():
     )
 
 # =========================================================
-# STARTUP
+# START THREAD
 # =========================================================
 
-start_ws_thread()
+def start_ws_thread():
+
+    threading.Thread(
+        target=start_dhan_ws,
+        daemon=True
+    ).start()
 
 # =========================================================
 # MAIN
 # =========================================================
 
 if __name__ == "__main__":
+
+    load_scrip_master()
+
+    start_ws_thread()
 
     port = int(
         os.environ.get("PORT", 5000)
