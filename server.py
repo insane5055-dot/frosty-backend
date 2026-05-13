@@ -889,25 +889,16 @@ def start_dhan_ws():
     )
 
 # =========================================================
-# START THREAD
+# STARTUP
 # =========================================================
 
-def start_ws_thread():
-
-    threading.Thread(
-        target=start_dhan_ws,
-        daemon=True
-    ).start()
+start_ws_thread()
 
 # =========================================================
 # MAIN
 # =========================================================
 
 if __name__ == "__main__":
-
-    load_scrip_master()
-
-    start_ws_thread()
 
     port = int(
         os.environ.get("PORT", 5000)
