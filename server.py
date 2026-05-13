@@ -50,11 +50,18 @@ def after_request(response):
 # =========================================================
 
 socketio = SocketIO(
+
     app,
+
     cors_allowed_origins="*",
+
     async_mode="gevent",
+
     ping_timeout=30,
-    ping_interval=25
+
+    ping_interval=25,
+
+    transports=["websocket", "polling"]
 )
 
 # =========================================================
@@ -66,8 +73,11 @@ ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5
 CLIENT_ID = "1101310334"
 
 HEADERS = {
+
     "Accept": "application/json",
+
     "Content-Type": "application/json",
+
     "access-token": ACCESS_TOKEN
 }
 
@@ -114,7 +124,9 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
+
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+
         low_memory=False
     )
 
@@ -142,16 +154,31 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
+    # =====================================================
+    # CLEAN
+    # =====================================================
+
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
 
+    # =====================================================
+    # PREPROCESS
+    # =====================================================
+
     SCRIP_MASTER["DISPLAY_UPPER"] = (
+
         SCRIP_MASTER[COL_DISPLAY]
+
         .astype(str)
+
         .str.upper()
     )
+
+    # =====================================================
+    # FAST SEARCH CACHE
+    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -232,8 +259,11 @@ def search_symbols():
                 contains.append(item)
 
         final = (
+
             exact[:5] +
+
             starts[:10] +
+
             contains[:10]
         )
 
@@ -329,9 +359,13 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
+
             df[COL_DISPLAY]
+
             .astype(str)
+
             .str.upper()
+
             .str.replace(" ", "")
         )
 
@@ -353,9 +387,14 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
+        # =================================================
+        # EXCHANGE SEGMENT
+        # =================================================
+
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
+
             pricescale = 1
 
         elif instrument in [
@@ -366,6 +405,7 @@ def resolve_symbol():
         ]:
 
             exchange_segment = "NSE_FNO"
+
             pricescale = 100
 
         else:
@@ -447,10 +487,15 @@ def resolve_symbol():
 # =========================================================
 
 def get_intraday_ohlc(
+
     security_id,
+
     exchange,
+
     instrument,
+
     from_date,
+
     to_date
 ):
 
@@ -474,9 +519,13 @@ def get_intraday_ohlc(
     }
 
     r = requests.post(
+
         url,
+
         headers=HEADERS,
+
         json=payload,
+
         timeout=20
     )
 
@@ -569,11 +618,15 @@ def history():
     try:
 
         security_id = request.args.get("security_id")
+
         exchange = request.args.get("exchange")
+
         instrument = request.args.get("instrument")
+
         resolution = request.args.get("resolution", "1")
 
         from_ts = int(request.args.get("from"))
+
         to_ts = int(request.args.get("to"))
 
         ist = pytz.timezone("Asia/Kolkata")
@@ -597,10 +650,15 @@ def history():
         )
 
         candles_1m = get_intraday_ohlc(
+
             security_id,
+
             exchange,
+
             instrument,
+
             from_date,
+
             to_date
         )
 
@@ -663,7 +721,7 @@ def history():
         })
 
 # =========================================================
-# TICK EMA CALCULATOR
+# TICK EMA
 # =========================================================
 
 def calculate_tick_ema(price):
@@ -677,8 +735,11 @@ def calculate_tick_ema(price):
     else:
 
         tick_ema = (
+
             (price - tick_ema)
+
             * ema_multiplier
+
         ) + tick_ema
 
     return round(tick_ema, 2)
@@ -754,6 +815,20 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
+# SOCKET CONNECT
+# =========================================================
+
+@socketio.on("connect")
+def handle_connect():
+
+    print("🟢 Frontend Connected")
+
+@socketio.on("disconnect")
+def handle_disconnect():
+
+    print("🔴 Frontend Disconnected")
+
+# =========================================================
 # DHAN WS
 # =========================================================
 
@@ -770,28 +845,39 @@ def start_dhan_ws():
             if packet_type != 2:
                 return
 
+            # =================================================
+            # LTP
+            # =================================================
+
             ltp = round(
+
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
+
                 2
             )
 
             # =================================================
-            # REALTIME EMA
+            # TICK EMA
             # =================================================
 
             ema_value = calculate_tick_ema(ltp)
 
-            socketio.emit("tick_ema", {
+            socketio.emit(
 
-                "time": int(time.time()),
+                "tick_ema",
 
-                "price": ltp,
+                {
 
-                "ema": ema_value
-            })
+                    "time": int(time.time()),
+
+                    "price": ltp,
+
+                    "ema": ema_value
+                }
+            )
 
             # =================================================
             # LIVE CANDLE
@@ -821,8 +907,10 @@ def start_dhan_ws():
             "InstrumentCount": 1,
 
             "InstrumentList": [
+
                 {
                     "ExchangeSegment": "IDX_I",
+
                     "SecurityId": "13"
                 }
             ]
@@ -858,7 +946,9 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
+
         ping_interval=20,
+
         ping_timeout=10
     )
 
@@ -869,7 +959,9 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
+
         target=start_dhan_ws,
+
         daemon=True
     ).start()
 
@@ -887,8 +979,15 @@ if __name__ == "__main__":
         os.environ.get("PORT", 5000)
     )
 
+    print(f"🚀 Server Running On Port {port}")
+
     socketio.run(
+
         app,
+
         host="0.0.0.0",
-        port=port
+
+        port=port,
+
+        debug=False
     )
