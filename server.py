@@ -1,5 +1,5 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
+# ULTRA FAST FINAL SERVER.PY WITH TICK EMA ENGINE
 # =========================================================
 
 from gevent import monkey
@@ -58,6 +58,8 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4ODUxNTU5LCJpYXQiOjE3Nzg3NjUxNTksInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.UTC6ChyLbgBt1xDLyjvGN73xbX42-raXlny_c1VsBV8fRg26n54hKBEp7BOx8ZWA3OQVFlYzA3NroE9FFE4pKQ"
 
+CLIENT_ID = "1101310334"
+
 HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
@@ -76,6 +78,49 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
+
+# =========================================================
+# INDICATOR ENGINE
+# =========================================================
+
+class TickEMA:
+
+    def __init__(self, period):
+
+        self.period = period
+
+        self.alpha = 2 / (period + 1)
+
+        self.value = None
+
+    def update(self, price):
+
+        if self.value is None:
+
+            self.value = price
+
+        else:
+
+            self.value = (
+                price * self.alpha
+                + self.value * (1 - self.alpha)
+            )
+
+        return round(self.value, 2)
+
+# =========================================================
+# EMA INSTANCES
+# =========================================================
+
+ema_20 = TickEMA(20)
+
+ema_50 = TickEMA(50)
+
+# =========================================================
+# CURRENT CANDLE
+# =========================================================
+
+current_candle = None
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -125,28 +170,16 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
-    # =====================================================
-    # CLEAN DATA
-    # =====================================================
-
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
-
-    # =====================================================
-    # PREPROCESS
-    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
-
-    # =====================================================
-    # FAST SEARCH CACHE
-    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -349,10 +382,6 @@ def resolve_symbol():
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
-
-        # =================================================
-        # EXCHANGE SEGMENT
-        # =================================================
 
         if "INDEX" in instrument:
 
@@ -664,10 +693,8 @@ def history():
         })
 
 # =========================================================
-# LIVE WEBSOCKET
+# PROCESS TICK
 # =========================================================
-
-current_candle = None
 
 def process_tick(price, volume):
 
@@ -676,6 +703,10 @@ def process_tick(price, volume):
     ts = int(time.time())
 
     minute = ts // 60
+
+    ema20 = ema_20.update(price)
+
+    ema50 = ema_50.update(price)
 
     if current_candle is None:
 
@@ -691,10 +722,14 @@ def process_tick(price, volume):
 
             "close": price,
 
-            "volume": volume
+            "volume": volume,
+
+            "ema20": ema20,
+
+            "ema50": ema50
         }
 
-        return None
+        return current_candle
 
     if minute == current_candle["minute"]:
 
@@ -712,6 +747,10 @@ def process_tick(price, volume):
 
         current_candle["volume"] += volume
 
+        current_candle["ema20"] = ema20
+
+        current_candle["ema50"] = ema50
+
         return current_candle
 
     finished = current_candle
@@ -728,7 +767,11 @@ def process_tick(price, volume):
 
         "close": price,
 
-        "volume": volume
+        "volume": volume,
+
+        "ema20": ema20,
+
+        "ema50": ema50
     }
 
     return finished
@@ -763,7 +806,7 @@ def start_dhan_ws():
             if candle:
 
                 socketio.emit(
-                    "candle",
+                    "market_data",
                     candle
                 )
 
@@ -807,7 +850,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
 
         on_message=on_message,
 
