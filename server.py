@@ -1,9 +1,7 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY WITH TICK EMA ENGINE
+# ULTRA FAST FINAL SERVER.PY
+# STABLE SOCKET VERSION
 # =========================================================
-
-from gevent import monkey
-monkey.patch_all()
 
 import os
 import json
@@ -45,10 +43,15 @@ CORS(
 # =========================================================
 
 socketio = SocketIO(
+
     app,
+
     cors_allowed_origins="*",
-    async_mode="gevent",
-    ping_timeout=30,
+
+    async_mode="threading",
+
+    ping_timeout=60,
+
     ping_interval=25
 )
 
@@ -61,8 +64,11 @@ ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5
 CLIENT_ID = "1101310334"
 
 HEADERS = {
+
     "Accept": "application/json",
+
     "Content-Type": "application/json",
+
     "access-token": ACCESS_TOKEN
 }
 
@@ -102,14 +108,16 @@ class TickEMA:
         else:
 
             self.value = (
-                price * self.alpha
-                + self.value * (1 - self.alpha)
+
+                price * self.alpha +
+
+                self.value * (1 - self.alpha)
             )
 
         return round(self.value, 2)
 
 # =========================================================
-# EMA INSTANCES
+# EMA ENGINES
 # =========================================================
 
 ema_20 = TickEMA(20)
@@ -142,40 +150,54 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
+
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+
         low_memory=False
     )
 
     SCRIP_MASTER.columns = (
+
         SCRIP_MASTER.columns.str.upper()
     )
 
     COL_DISPLAY = next(
+
         c for c in SCRIP_MASTER.columns
+
         if "DISPLAY" in c
     )
 
     COL_SECURITY = next(
+
         c for c in SCRIP_MASTER.columns
+
         if "SECURITY" in c
     )
 
     COL_EXCHANGE = next(
+
         c for c in SCRIP_MASTER.columns
+
         if "EXCH" in c
     )
 
     COL_INSTRUMENT = next(
+
         c for c in SCRIP_MASTER.columns
+
         if "INSTRUMENT" in c
     )
 
     SCRIP_MASTER.dropna(
+
         subset=[COL_DISPLAY],
+
         inplace=True
     )
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
+
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
@@ -186,9 +208,13 @@ def load_scrip_master():
         exchange = str(row[COL_EXCHANGE])
 
         if exchange not in [
+
             "NSE",
+
             "BSE",
+
             "NSE_FNO",
+
             "IDX_I"
         ]:
             continue
@@ -234,11 +260,14 @@ def search_symbols():
         load_scrip_master()
 
         q = request.args.get(
+
             "q",
+
             ""
         ).upper().strip()
 
         if not q:
+
             return jsonify([])
 
         exact = []
@@ -262,8 +291,11 @@ def search_symbols():
                 contains.append(item)
 
         final = (
+
             exact[:5] +
+
             starts[:10] +
+
             contains[:10]
         )
 
@@ -278,14 +310,18 @@ def search_symbols():
                 tv_type = "index"
 
             elif instr in [
+
                 "FUTIDX",
+
                 "FUTSTK"
             ]:
 
                 tv_type = "futures"
 
             elif instr in [
+
                 "OPTIDX",
+
                 "OPTSTK"
             ]:
 
@@ -337,7 +373,9 @@ def resolve_symbol():
         load_scrip_master()
 
         symbol_raw = request.args.get(
+
             "symbol",
+
             ""
         ).upper().strip()
 
@@ -346,12 +384,14 @@ def resolve_symbol():
         if ":" in symbol_raw:
 
             exchange_param, symbol = (
+
                 symbol_raw.split(":", 1)
             )
 
         else:
 
             exchange_param = ""
+
             symbol = symbol_raw
 
         symbol = symbol.replace(" ", "")
@@ -359,6 +399,7 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
+
             df[COL_DISPLAY]
             .astype(str)
             .str.upper()
@@ -376,7 +417,9 @@ def resolve_symbol():
         if row.empty:
 
             return jsonify({
+
                 "error": "symbol not found"
+
             }), 404
 
         row = row.iloc[0]
@@ -386,16 +429,22 @@ def resolve_symbol():
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
+
             pricescale = 1
 
         elif instrument in [
+
             "OPTIDX",
+
             "FUTIDX",
+
             "OPTSTK",
+
             "FUTSTK"
         ]:
 
             exchange_segment = "NSE_FNO"
+
             pricescale = 100
 
         else:
@@ -469,7 +518,9 @@ def resolve_symbol():
         print("❌ RESOLVE ERROR:", str(e))
 
         return jsonify({
+
             "error": str(e)
+
         }), 500
 
 # =========================================================
@@ -477,10 +528,15 @@ def resolve_symbol():
 # =========================================================
 
 def get_intraday_ohlc(
+
     security_id,
+
     exchange,
+
     instrument,
+
     from_date,
+
     to_date
 ):
 
@@ -504,9 +560,13 @@ def get_intraday_ohlc(
     }
 
     r = requests.post(
+
         url,
+
         headers=HEADERS,
+
         json=payload,
+
         timeout=20
     )
 
@@ -519,6 +579,7 @@ def get_intraday_ohlc(
     res = r.json()
 
     if "open" not in res:
+
         return []
 
     data = []
@@ -528,6 +589,7 @@ def get_intraday_ohlc(
         ts = int(res["timestamp"][i])
 
         if len(str(ts)) == 13:
+
             ts //= 1000
 
         data.append({
@@ -546,7 +608,9 @@ def get_intraday_ohlc(
         })
 
     return sorted(
+
         data,
+
         key=lambda x: x["time"]
     )
 
@@ -563,6 +627,7 @@ def aggregate_candles(candles, step):
         chunk = candles[i:i + step]
 
         if len(chunk) < step:
+
             continue
 
         out.append({
@@ -599,22 +664,34 @@ def history():
     try:
 
         security_id = request.args.get("security_id")
+
         exchange = request.args.get("exchange")
+
         instrument = request.args.get("instrument")
-        resolution = request.args.get("resolution", "1")
+
+        resolution = request.args.get(
+            "resolution",
+            "1"
+        )
 
         from_ts = int(request.args.get("from"))
+
         to_ts = int(request.args.get("to"))
 
         ist = pytz.timezone("Asia/Kolkata")
 
         from_dt = datetime.fromtimestamp(
+
             from_ts,
+
             tz=ist
+
         ) - timedelta(days=5)
 
         to_dt = datetime.fromtimestamp(
+
             to_ts,
+
             tz=ist
         )
 
@@ -627,10 +704,15 @@ def history():
         )
 
         candles_1m = get_intraday_ohlc(
+
             security_id,
+
             exchange,
+
             instrument,
+
             from_date,
+
             to_date
         )
 
@@ -777,7 +859,7 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
-# DHAN WS
+# DHAN WEBSOCKET
 # =========================================================
 
 def start_dhan_ws():
@@ -794,10 +876,12 @@ def start_dhan_ws():
                 return
 
             ltp = round(
+
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
+
                 2
             )
 
@@ -806,13 +890,15 @@ def start_dhan_ws():
             if candle:
 
                 socketio.emit(
+
                     "market_data",
+
                     candle
                 )
 
         except Exception as e:
 
-            print("❌ WS DECODE ERROR:", e)
+            print("❌ WS ERROR:", e)
 
     def on_open(ws):
 
@@ -862,7 +948,9 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
+
         ping_interval=20,
+
         ping_timeout=10
     )
 
@@ -873,7 +961,9 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
+
         target=start_dhan_ws,
+
         daemon=True
     ).start()
 
@@ -886,11 +976,21 @@ if __name__ == "__main__":
     start_ws_thread()
 
     port = int(
+
         os.environ.get("PORT", 5000)
     )
 
     socketio.run(
+
         app,
+
         host="0.0.0.0",
-        port=port
+
+        port=port,
+
+        debug=False,
+
+        use_reloader=False,
+
+        allow_unsafe_werkzeug=True
     )
