@@ -1,6 +1,5 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
-# STABLE SOCKET VERSION
+# ULTRA FAST MULTI SYMBOL SERVER.PY
 # =========================================================
 
 import os
@@ -61,7 +60,7 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4ODUxNTU5LCJpYXQiOjE3Nzg3NjUxNTksInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.UTC6ChyLbgBt1xDLyjvGN73xbX42-raXlny_c1VsBV8fRg26n54hKBEp7BOx8ZWA3OQVFlYzA3NroE9FFE4pKQ"
 
-CLIENT_ID = "1101310334"
+CLIENT_ID = "YOUR_CLIENT_ID"
 
 HEADERS = {
 
@@ -117,18 +116,44 @@ class TickEMA:
         return round(self.value, 2)
 
 # =========================================================
-# EMA ENGINES
+# SYMBOL ENGINES
 # =========================================================
 
-ema_20 = TickEMA(20)
-
-ema_50 = TickEMA(50)
+symbol_engines = {}
 
 # =========================================================
-# CURRENT CANDLE
+# CREATE ENGINE
 # =========================================================
 
-current_candle = None
+def get_symbol_engine(symbol):
+
+    if symbol not in symbol_engines:
+
+        symbol_engines[symbol] = {
+
+            "ema20": TickEMA(20),
+
+            "ema50": TickEMA(50),
+
+            "current_candle": None
+        }
+
+        print(f"✅ Created Engine For {symbol}")
+
+    return symbol_engines[symbol]
+
+# =========================================================
+# ACTIVE SYMBOL
+# =========================================================
+
+ACTIVE_SYMBOL = {
+
+    "security_id": "13",
+
+    "exchange_segment": "IDX_I",
+
+    "symbol": "NIFTY"
+}
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -524,6 +549,33 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
+# CHANGE SYMBOL
+# =========================================================
+
+@socketio.on("change_symbol")
+def change_symbol(data):
+
+    try:
+
+        ACTIVE_SYMBOL["security_id"] = str(
+            data["security_id"]
+        )
+
+        ACTIVE_SYMBOL["exchange_segment"] = str(
+            data["exchange_segment"]
+        )
+
+        ACTIVE_SYMBOL["symbol"] = str(
+            data["symbol"]
+        )
+
+        print("✅ ACTIVE SYMBOL:", ACTIVE_SYMBOL)
+
+    except Exception as e:
+
+        print("❌ SYMBOL CHANGE ERROR:", e)
+
+# =========================================================
 # FETCH INTRADAY
 # =========================================================
 
@@ -778,21 +830,29 @@ def history():
 # PROCESS TICK
 # =========================================================
 
-def process_tick(price, volume):
+def process_tick(symbol, price, volume):
 
-    global current_candle
+    engine = get_symbol_engine(symbol)
+
+    current_candle = engine["current_candle"]
+
+    ema20_engine = engine["ema20"]
+
+    ema50_engine = engine["ema50"]
 
     ts = int(time.time())
 
     minute = ts // 60
 
-    ema20 = ema_20.update(price)
+    ema20 = ema20_engine.update(price)
 
-    ema50 = ema_50.update(price)
+    ema50 = ema50_engine.update(price)
 
     if current_candle is None:
 
-        current_candle = {
+        engine["current_candle"] = {
+
+            "symbol": symbol,
 
             "minute": minute,
 
@@ -811,7 +871,7 @@ def process_tick(price, volume):
             "ema50": ema50
         }
 
-        return current_candle
+        return engine["current_candle"]
 
     if minute == current_candle["minute"]:
 
@@ -837,7 +897,9 @@ def process_tick(price, volume):
 
     finished = current_candle
 
-    current_candle = {
+    engine["current_candle"] = {
+
+        "symbol": symbol,
 
         "minute": minute,
 
@@ -885,7 +947,13 @@ def start_dhan_ws():
                 2
             )
 
-            candle = process_tick(ltp, 0)
+            symbol = ACTIVE_SYMBOL["symbol"]
+
+            candle = process_tick(
+                symbol,
+                ltp,
+                0
+            )
 
             if candle:
 
@@ -912,8 +980,15 @@ def start_dhan_ws():
 
             "InstrumentList": [
                 {
-                    "ExchangeSegment": "IDX_I",
-                    "SecurityId": "13"
+                    "ExchangeSegment":
+                    ACTIVE_SYMBOL[
+                        "exchange_segment"
+                    ],
+
+                    "SecurityId":
+                    ACTIVE_SYMBOL[
+                        "security_id"
+                    ]
                 }
             ]
         }
