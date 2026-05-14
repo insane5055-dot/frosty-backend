@@ -1,6 +1,9 @@
 # =========================================================
-# ULTRA FAST MULTI SYMBOL SERVER.PY
+# ULTRA FAST FINAL SERVER.PY
 # =========================================================
+
+from gevent import monkey
+monkey.patch_all()
 
 import os
 import json
@@ -42,15 +45,10 @@ CORS(
 # =========================================================
 
 socketio = SocketIO(
-
     app,
-
     cors_allowed_origins="*",
-
-    async_mode="threading",
-
-    ping_timeout=60,
-
+    async_mode="gevent",
+    ping_timeout=30,
     ping_interval=25
 )
 
@@ -60,14 +58,9 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4ODUxNTU5LCJpYXQiOjE3Nzg3NjUxNTksInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.UTC6ChyLbgBt1xDLyjvGN73xbX42-raXlny_c1VsBV8fRg26n54hKBEp7BOx8ZWA3OQVFlYzA3NroE9FFE4pKQ"
 
-CLIENT_ID = "1101310334"
-
 HEADERS = {
-
     "Accept": "application/json",
-
     "Content-Type": "application/json",
-
     "access-token": ACCESS_TOKEN
 }
 
@@ -83,77 +76,6 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
-
-# =========================================================
-# INDICATOR ENGINE
-# =========================================================
-
-class TickEMA:
-
-    def __init__(self, period):
-
-        self.period = period
-
-        self.alpha = 2 / (period + 1)
-
-        self.value = None
-
-    def update(self, price):
-
-        if self.value is None:
-
-            self.value = price
-
-        else:
-
-            self.value = (
-
-                price * self.alpha +
-
-                self.value * (1 - self.alpha)
-            )
-
-        return round(self.value, 2)
-
-# =========================================================
-# SYMBOL ENGINES
-# =========================================================
-
-symbol_engines = {}
-
-# =========================================================
-# CREATE ENGINE
-# =========================================================
-
-def get_symbol_engine(symbol):
-
-    if symbol not in symbol_engines:
-
-        symbol_engines[symbol] = {
-
-            "ema20": TickEMA(20),
-
-            "ema50": TickEMA(50),
-
-            "current_candle": None
-        }
-
-        print(f"✅ Created Engine For {symbol}")
-
-    return symbol_engines[symbol]
-
-# =========================================================
-# ACTIVE SYMBOL
-# =========================================================
-
-ACTIVE_SYMBOL = {
-
-    "security_id": "13",
-
-    "exchange_segment": "IDX_I",
-
-    "symbol": "NIFTY"
-}
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -175,71 +97,65 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
-
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
-
         low_memory=False
     )
 
     SCRIP_MASTER.columns = (
-
         SCRIP_MASTER.columns.str.upper()
     )
 
     COL_DISPLAY = next(
-
         c for c in SCRIP_MASTER.columns
-
         if "DISPLAY" in c
     )
 
     COL_SECURITY = next(
-
         c for c in SCRIP_MASTER.columns
-
         if "SECURITY" in c
     )
 
     COL_EXCHANGE = next(
-
         c for c in SCRIP_MASTER.columns
-
         if "EXCH" in c
     )
 
     COL_INSTRUMENT = next(
-
         c for c in SCRIP_MASTER.columns
-
         if "INSTRUMENT" in c
     )
 
+    # =====================================================
+    # CLEAN DATA
+    # =====================================================
+
     SCRIP_MASTER.dropna(
-
         subset=[COL_DISPLAY],
-
         inplace=True
     )
 
-    SCRIP_MASTER["DISPLAY_UPPER"] = (
+    # =====================================================
+    # PREPROCESS
+    # =====================================================
 
+    SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
+
+    # =====================================================
+    # FAST SEARCH CACHE
+    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
         exchange = str(row[COL_EXCHANGE])
 
         if exchange not in [
-
             "NSE",
-
             "BSE",
-
             "NSE_FNO",
-
             "IDX_I"
         ]:
             continue
@@ -285,14 +201,11 @@ def search_symbols():
         load_scrip_master()
 
         q = request.args.get(
-
             "q",
-
             ""
         ).upper().strip()
 
         if not q:
-
             return jsonify([])
 
         exact = []
@@ -316,11 +229,8 @@ def search_symbols():
                 contains.append(item)
 
         final = (
-
             exact[:5] +
-
             starts[:10] +
-
             contains[:10]
         )
 
@@ -335,18 +245,14 @@ def search_symbols():
                 tv_type = "index"
 
             elif instr in [
-
                 "FUTIDX",
-
                 "FUTSTK"
             ]:
 
                 tv_type = "futures"
 
             elif instr in [
-
                 "OPTIDX",
-
                 "OPTSTK"
             ]:
 
@@ -398,9 +304,7 @@ def resolve_symbol():
         load_scrip_master()
 
         symbol_raw = request.args.get(
-
             "symbol",
-
             ""
         ).upper().strip()
 
@@ -409,14 +313,12 @@ def resolve_symbol():
         if ":" in symbol_raw:
 
             exchange_param, symbol = (
-
                 symbol_raw.split(":", 1)
             )
 
         else:
 
             exchange_param = ""
-
             symbol = symbol_raw
 
         symbol = symbol.replace(" ", "")
@@ -424,7 +326,6 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
-
             df[COL_DISPLAY]
             .astype(str)
             .str.upper()
@@ -442,34 +343,30 @@ def resolve_symbol():
         if row.empty:
 
             return jsonify({
-
                 "error": "symbol not found"
-
             }), 404
 
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
 
+        # =================================================
+        # EXCHANGE SEGMENT
+        # =================================================
+
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
-
             pricescale = 1
 
         elif instrument in [
-
             "OPTIDX",
-
             "FUTIDX",
-
             "OPTSTK",
-
             "FUTSTK"
         ]:
 
             exchange_segment = "NSE_FNO"
-
             pricescale = 100
 
         else:
@@ -543,52 +440,18 @@ def resolve_symbol():
         print("❌ RESOLVE ERROR:", str(e))
 
         return jsonify({
-
             "error": str(e)
-
         }), 500
-
-# =========================================================
-# CHANGE SYMBOL
-# =========================================================
-
-@socketio.on("change_symbol")
-def change_symbol(data):
-
-    try:
-
-        ACTIVE_SYMBOL["security_id"] = str(
-            data["security_id"]
-        )
-
-        ACTIVE_SYMBOL["exchange_segment"] = str(
-            data["exchange_segment"]
-        )
-
-        ACTIVE_SYMBOL["symbol"] = str(
-            data["symbol"]
-        )
-
-        print("✅ ACTIVE SYMBOL:", ACTIVE_SYMBOL)
-
-    except Exception as e:
-
-        print("❌ SYMBOL CHANGE ERROR:", e)
 
 # =========================================================
 # FETCH INTRADAY
 # =========================================================
 
 def get_intraday_ohlc(
-
     security_id,
-
     exchange,
-
     instrument,
-
     from_date,
-
     to_date
 ):
 
@@ -612,13 +475,9 @@ def get_intraday_ohlc(
     }
 
     r = requests.post(
-
         url,
-
         headers=HEADERS,
-
         json=payload,
-
         timeout=20
     )
 
@@ -631,7 +490,6 @@ def get_intraday_ohlc(
     res = r.json()
 
     if "open" not in res:
-
         return []
 
     data = []
@@ -641,7 +499,6 @@ def get_intraday_ohlc(
         ts = int(res["timestamp"][i])
 
         if len(str(ts)) == 13:
-
             ts //= 1000
 
         data.append({
@@ -660,9 +517,7 @@ def get_intraday_ohlc(
         })
 
     return sorted(
-
         data,
-
         key=lambda x: x["time"]
     )
 
@@ -679,7 +534,6 @@ def aggregate_candles(candles, step):
         chunk = candles[i:i + step]
 
         if len(chunk) < step:
-
             continue
 
         out.append({
@@ -716,34 +570,22 @@ def history():
     try:
 
         security_id = request.args.get("security_id")
-
         exchange = request.args.get("exchange")
-
         instrument = request.args.get("instrument")
-
-        resolution = request.args.get(
-            "resolution",
-            "1"
-        )
+        resolution = request.args.get("resolution", "1")
 
         from_ts = int(request.args.get("from"))
-
         to_ts = int(request.args.get("to"))
 
         ist = pytz.timezone("Asia/Kolkata")
 
         from_dt = datetime.fromtimestamp(
-
             from_ts,
-
             tz=ist
-
         ) - timedelta(days=5)
 
         to_dt = datetime.fromtimestamp(
-
             to_ts,
-
             tz=ist
         )
 
@@ -756,15 +598,10 @@ def history():
         )
 
         candles_1m = get_intraday_ohlc(
-
             security_id,
-
             exchange,
-
             instrument,
-
             from_date,
-
             to_date
         )
 
@@ -827,32 +664,22 @@ def history():
         })
 
 # =========================================================
-# PROCESS TICK
+# LIVE WEBSOCKET
 # =========================================================
 
-def process_tick(symbol, price, volume):
+current_candle = None
 
-    engine = get_symbol_engine(symbol)
+def process_tick(price, volume):
 
-    current_candle = engine["current_candle"]
-
-    ema20_engine = engine["ema20"]
-
-    ema50_engine = engine["ema50"]
+    global current_candle
 
     ts = int(time.time())
 
     minute = ts // 60
 
-    ema20 = ema20_engine.update(price)
-
-    ema50 = ema50_engine.update(price)
-
     if current_candle is None:
 
-        engine["current_candle"] = {
-
-            "symbol": symbol,
+        current_candle = {
 
             "minute": minute,
 
@@ -864,14 +691,10 @@ def process_tick(symbol, price, volume):
 
             "close": price,
 
-            "volume": volume,
-
-            "ema20": ema20,
-
-            "ema50": ema50
+            "volume": volume
         }
 
-        return engine["current_candle"]
+        return None
 
     if minute == current_candle["minute"]:
 
@@ -889,17 +712,11 @@ def process_tick(symbol, price, volume):
 
         current_candle["volume"] += volume
 
-        current_candle["ema20"] = ema20
-
-        current_candle["ema50"] = ema50
-
         return current_candle
 
     finished = current_candle
 
-    engine["current_candle"] = {
-
-        "symbol": symbol,
+    current_candle = {
 
         "minute": minute,
 
@@ -911,17 +728,13 @@ def process_tick(symbol, price, volume):
 
         "close": price,
 
-        "volume": volume,
-
-        "ema20": ema20,
-
-        "ema50": ema50
+        "volume": volume
     }
 
     return finished
 
 # =========================================================
-# DHAN WEBSOCKET
+# DHAN WS
 # =========================================================
 
 def start_dhan_ws():
@@ -938,35 +751,25 @@ def start_dhan_ws():
                 return
 
             ltp = round(
-
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
-
                 2
             )
 
-            symbol = ACTIVE_SYMBOL["symbol"]
-
-            candle = process_tick(
-                symbol,
-                ltp,
-                0
-            )
+            candle = process_tick(ltp, 0)
 
             if candle:
 
                 socketio.emit(
-
-                    "market_data",
-
+                    "candle",
                     candle
                 )
 
         except Exception as e:
 
-            print("❌ WS ERROR:", e)
+            print("❌ WS DECODE ERROR:", e)
 
     def on_open(ws):
 
@@ -980,15 +783,8 @@ def start_dhan_ws():
 
             "InstrumentList": [
                 {
-                    "ExchangeSegment":
-                    ACTIVE_SYMBOL[
-                        "exchange_segment"
-                    ],
-
-                    "SecurityId":
-                    ACTIVE_SYMBOL[
-                        "security_id"
-                    ]
+                    "ExchangeSegment": "IDX_I",
+                    "SecurityId": "13"
                 }
             ]
         }
@@ -1011,7 +807,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
 
         on_message=on_message,
 
@@ -1023,9 +819,7 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
-
         ping_interval=20,
-
         ping_timeout=10
     )
 
@@ -1036,9 +830,7 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
-
         target=start_dhan_ws,
-
         daemon=True
     ).start()
 
@@ -1051,21 +843,11 @@ if __name__ == "__main__":
     start_ws_thread()
 
     port = int(
-
         os.environ.get("PORT", 5000)
     )
 
     socketio.run(
-
         app,
-
         host="0.0.0.0",
-
-        port=port,
-
-        debug=False,
-
-        use_reloader=False,
-
-        allow_unsafe_werkzeug=True
+        port=port
     )
