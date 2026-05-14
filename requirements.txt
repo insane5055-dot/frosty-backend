@@ -1,6 +1,8 @@
 flask
 flask-cors
 flask-socketio
+gevent
+gevent-websocket
 gunicorn
 requests
 pandas
