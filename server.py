@@ -1,5 +1,5 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
+# ULTRA FAST UPDATED SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -15,17 +15,21 @@ import pandas as pd
 import pytz
 import websocket
 
-from datetime import datetime, timedelta
+from functools import lru_cache
+from datetime import datetime
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
+from flask_compress import Compress
 
 # =========================================================
 # FLASK APP
 # =========================================================
 
 app = Flask(__name__)
+
+Compress(app)
 
 # =========================================================
 # CORS
@@ -45,11 +49,16 @@ CORS(
 # =========================================================
 
 socketio = SocketIO(
+
     app,
+
     cors_allowed_origins="*",
+
     async_mode="gevent",
-    ping_timeout=30,
-    ping_interval=25
+
+    ping_timeout=10,
+
+    ping_interval=5
 )
 
 # =========================================================
@@ -58,9 +67,14 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4ODUxNTU5LCJpYXQiOjE3Nzg3NjUxNTksInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.UTC6ChyLbgBt1xDLyjvGN73xbX42-raXlny_c1VsBV8fRg26n54hKBEp7BOx8ZWA3OQVFlYzA3NroE9FFE4pKQ"
 
+CLIENT_ID = "1101310334"
+
 HEADERS = {
+
     "Accept": "application/json",
+
     "Content-Type": "application/json",
+
     "access-token": ACCESS_TOKEN
 }
 
@@ -71,6 +85,8 @@ HEADERS = {
 SCRIP_MASTER = None
 
 SEARCH_CACHE = []
+
+SYMBOL_MAP = {}
 
 COL_DISPLAY = None
 COL_SECURITY = None
@@ -85,6 +101,7 @@ def load_scrip_master():
 
     global SCRIP_MASTER
     global SEARCH_CACHE
+    global SYMBOL_MAP
 
     global COL_DISPLAY
     global COL_SECURITY
@@ -96,10 +113,32 @@ def load_scrip_master():
 
     print("🔥 Loading Scrip Master...")
 
-    SCRIP_MASTER = pd.read_csv(
-        "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
-        low_memory=False
-    )
+    # =====================================================
+    # LOCAL PARQUET (FASTEST)
+    # =====================================================
+
+    if os.path.exists("scrip_master.parquet"):
+
+        SCRIP_MASTER = pd.read_parquet(
+            "scrip_master.parquet"
+        )
+
+    else:
+
+        url = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
+
+        SCRIP_MASTER = pd.read_csv(
+            url,
+            low_memory=False
+        )
+
+        SCRIP_MASTER.to_parquet(
+            "scrip_master.parquet"
+        )
+
+    # =====================================================
+    # UPPERCASE COLUMNS
+    # =====================================================
 
     SCRIP_MASTER.columns = (
         SCRIP_MASTER.columns.str.upper()
@@ -126,7 +165,7 @@ def load_scrip_master():
     )
 
     # =====================================================
-    # CLEAN DATA
+    # CLEAN
     # =====================================================
 
     SCRIP_MASTER.dropna(
@@ -139,13 +178,22 @@ def load_scrip_master():
     # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
+
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
 
+    SCRIP_MASTER["MATCH"] = (
+
+        SCRIP_MASTER[COL_DISPLAY]
+        .astype(str)
+        .str.upper()
+        .str.replace(" ", "")
+    )
+
     # =====================================================
-    # FAST SEARCH CACHE
+    # FAST CACHE
     # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
@@ -160,7 +208,7 @@ def load_scrip_master():
         ]:
             continue
 
-        SEARCH_CACHE.append({
+        item = {
 
             "display_upper":
             str(row[COL_DISPLAY]).upper(),
@@ -173,7 +221,17 @@ def load_scrip_master():
 
             "instrument":
             row[COL_INSTRUMENT]
-        })
+        }
+
+        SEARCH_CACHE.append(item)
+
+        key = (
+            str(row[COL_DISPLAY])
+            .upper()
+            .replace(" ", "")
+        )
+
+        SYMBOL_MAP[key] = row
 
     print("⚡ Search cache ready:", len(SEARCH_CACHE))
 
@@ -323,30 +381,13 @@ def resolve_symbol():
 
         symbol = symbol.replace(" ", "")
 
-        df = SCRIP_MASTER.copy()
+        row = SYMBOL_MAP.get(symbol)
 
-        df["MATCH"] = (
-            df[COL_DISPLAY]
-            .astype(str)
-            .str.upper()
-            .str.replace(" ", "")
-        )
-
-        row = df[df["MATCH"] == symbol]
-
-        if exchange_param:
-
-            row = row[
-                row[COL_EXCHANGE] == exchange_param
-            ]
-
-        if row.empty:
+        if row is None:
 
             return jsonify({
                 "error": "symbol not found"
             }), 404
-
-        row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
 
@@ -447,7 +488,9 @@ def resolve_symbol():
 # FETCH INTRADAY
 # =========================================================
 
+@lru_cache(maxsize=100)
 def get_intraday_ohlc(
+
     security_id,
     exchange,
     instrument,
@@ -475,10 +518,14 @@ def get_intraday_ohlc(
     }
 
     r = requests.post(
+
         url,
+
         headers=HEADERS,
+
         json=payload,
-        timeout=20
+
+        timeout=10
     )
 
     if r.status_code != 200:
@@ -582,7 +629,7 @@ def history():
         from_dt = datetime.fromtimestamp(
             from_ts,
             tz=ist
-        ) - timedelta(days=5)
+        )
 
         to_dt = datetime.fromtimestamp(
             to_ts,
@@ -598,6 +645,7 @@ def history():
         )
 
         candles_1m = get_intraday_ohlc(
+
             security_id,
             exchange,
             instrument,
@@ -751,6 +799,7 @@ def start_dhan_ws():
                 return
 
             ltp = round(
+
                 struct.unpack(
                     '<f',
                     message[8:12]
@@ -801,13 +850,13 @@ def start_dhan_ws():
 
         print("❌ DHAN WS CLOSED")
 
-        time.sleep(5)
+        time.sleep(3)
 
         start_ws_thread()
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
 
         on_message=on_message,
 
@@ -819,8 +868,10 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
-        ping_interval=20,
-        ping_timeout=10
+
+        ping_interval=10,
+
+        ping_timeout=5
     )
 
 # =========================================================
@@ -830,7 +881,9 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
+
         target=start_dhan_ws,
+
         daemon=True
     ).start()
 
@@ -840,6 +893,8 @@ def start_ws_thread():
 
 if __name__ == "__main__":
 
+    load_scrip_master()
+
     start_ws_thread()
 
     port = int(
@@ -847,7 +902,10 @@ if __name__ == "__main__":
     )
 
     socketio.run(
+
         app,
+
         host="0.0.0.0",
+
         port=port
     )
