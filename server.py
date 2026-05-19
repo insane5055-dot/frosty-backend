@@ -57,9 +57,9 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mjg4ODc3LCJpYXQiOjE3NzkyMDI0NzcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.vPSfT9wLzkLqvBRukg3D9oH3PPeb5qDaKgGHB2b5BLxZl7P1d2-nPwbpvu7lBTzQBSNsmdKYZ5czDXB-EqrrHg"
 
-CLIENT_ID = "YOUR_CLIENT_ID"
+CLIENT_ID = "1101310334"
 
 HEADERS = {
     "Accept": "application/json",
