@@ -1,10 +1,15 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
-# LIVE FLOATING DOM + SOCKET.IO + RENDER FIX
+# FROSTY TRADER
+# LIVE FLOATING DOM SERVER
+# RENDER + SOCKET.IO + DHAN WS
 # =========================================================
 
 from gevent import monkey
 monkey.patch_all()
+
+# =========================================================
+# IMPORTS
+# =========================================================
 
 import os
 import json
@@ -13,13 +18,13 @@ import struct
 import threading
 import requests
 import pandas as pd
-import pytz
 import websocket
 
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
+
 from flask_socketio import SocketIO
 
 # =========================================================
@@ -53,6 +58,8 @@ socketio = SocketIO(
 
     async_mode="gevent",
 
+    transports=["websocket"],
+
     ping_timeout=30,
 
     ping_interval=25
@@ -62,9 +69,9 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mjg4ODc3LCJpYXQiOjE3NzkyMDI0NzcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.vPSfT9wLzkLqvBRukg3D9oH3PPeb5qDaKgGHB2b5BLxZl7P1d2-nPwbpvu7lBTzQBSNsmdKYZ5czDXB-EqrrHg"
 
-CLIENT_ID = "YOUR_CLIENT_ID"
+CLIENT_ID = "1101310334"
 
 HEADERS = {
 
@@ -100,6 +107,12 @@ live_dom = {
 }
 
 # =========================================================
+# LIVE PRICE
+# =========================================================
+
+live_price = 0
+
+# =========================================================
 # CURRENT CANDLE
 # =========================================================
 
@@ -125,12 +138,16 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
+
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+
         low_memory=False
     )
 
     SCRIP_MASTER.columns = (
-        SCRIP_MASTER.columns.str.upper()
+
+        SCRIP_MASTER.columns
+        .str.upper()
     )
 
     COL_DISPLAY = next(
@@ -154,11 +171,14 @@ def load_scrip_master():
     )
 
     SCRIP_MASTER.dropna(
+
         subset=[COL_DISPLAY],
+
         inplace=True
     )
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
+
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
@@ -166,9 +186,12 @@ def load_scrip_master():
 
     for _, row in SCRIP_MASTER.iterrows():
 
-        exchange = str(row[COL_EXCHANGE])
+        exchange = str(
+            row[COL_EXCHANGE]
+        )
 
         if exchange not in [
+
             "NSE",
             "BSE",
             "NSE_FNO",
@@ -248,8 +271,11 @@ def search_symbols():
                 contains.append(item)
 
         final = (
+
             exact[:5] +
+
             starts[:10] +
+
             contains[:10]
         )
 
@@ -257,13 +283,16 @@ def search_symbols():
 
         for item in final:
 
-            instr = str(item["instrument"])
+            instr = str(
+                item["instrument"]
+            )
 
             if "INDEX" in instr:
 
                 tv_type = "index"
 
             elif instr in [
+
                 "FUTIDX",
                 "FUTSTK"
             ]:
@@ -271,6 +300,7 @@ def search_symbols():
                 tv_type = "futures"
 
             elif instr in [
+
                 "OPTIDX",
                 "OPTSTK"
             ]:
@@ -338,41 +368,55 @@ def resolve_symbol():
             exchange_param = ""
             symbol = symbol_raw
 
-        symbol = symbol.replace(" ", "")
+        symbol = symbol.replace(
+            " ",
+            ""
+        )
 
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
+
             df[COL_DISPLAY]
             .astype(str)
             .str.upper()
             .str.replace(" ", "")
         )
 
-        row = df[df["MATCH"] == symbol]
+        row = df[
+            df["MATCH"] == symbol
+        ]
 
         if exchange_param:
 
             row = row[
-                row[COL_EXCHANGE] == exchange_param
+                row[COL_EXCHANGE]
+                == exchange_param
             ]
 
         if row.empty:
 
             return jsonify({
-                "error": "symbol not found"
+
+                "error":
+                "symbol not found"
+
             }), 404
 
         row = row.iloc[0]
 
-        instrument = str(row[COL_INSTRUMENT])
+        instrument = str(
+            row[COL_INSTRUMENT]
+        )
 
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
+
             pricescale = 1
 
         elif instrument in [
+
             "OPTIDX",
             "FUTIDX",
             "OPTSTK",
@@ -380,11 +424,13 @@ def resolve_symbol():
         ]:
 
             exchange_segment = "NSE_FNO"
+
             pricescale = 100
 
         else:
 
             exchange_segment = "NSE_EQ"
+
             pricescale = 100
 
         return jsonify({
@@ -440,10 +486,13 @@ def resolve_symbol():
 
     except Exception as e:
 
-        print("❌ RESOLVE ERROR:", str(e))
+        print("❌ RESOLVE ERROR:", e)
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+            str(e)
+
         }), 500
 
 # =========================================================
@@ -457,19 +506,28 @@ def history():
     try:
 
         return jsonify({
+
             "s": "ok",
+
             "t": [],
+
             "o": [],
+
             "h": [],
+
             "l": [],
+
             "c": [],
+
             "v": []
         })
 
     except Exception as e:
 
         return jsonify({
+
             "s": "error",
+
             "errmsg": str(e)
         })
 
@@ -477,7 +535,7 @@ def history():
 # PROCESS TICK
 # =========================================================
 
-def process_tick(price, volume):
+def process_tick(price):
 
     global current_candle
 
@@ -497,9 +555,7 @@ def process_tick(price, volume):
 
             "low": price,
 
-            "close": price,
-
-            "volume": volume
+            "close": price
         }
 
         return None
@@ -507,18 +563,18 @@ def process_tick(price, volume):
     if minute == current_candle["minute"]:
 
         current_candle["high"] = max(
+
             current_candle["high"],
             price
         )
 
         current_candle["low"] = min(
+
             current_candle["low"],
             price
         )
 
         current_candle["close"] = price
-
-        current_candle["volume"] += volume
 
         return current_candle
 
@@ -534,15 +590,13 @@ def process_tick(price, volume):
 
         "low": price,
 
-        "close": price,
-
-        "volume": volume
+        "close": price
     }
 
     return finished
 
 # =========================================================
-# DHAN WEBSOCKET
+# DHAN WS
 # =========================================================
 
 def start_dhan_ws():
@@ -551,43 +605,59 @@ def start_dhan_ws():
 
     def on_message(ws, message):
 
+        global live_price
         global live_dom
 
         try:
 
-            packet_type = message[0]
-
-            # =================================================
+            # =============================================
             # LIVE PRICE
-            # =================================================
+            # =============================================
 
-            if packet_type == 2:
+            if len(message) >= 12:
 
-                ltp = round(
-                    struct.unpack(
-                        '<f',
-                        message[8:12]
-                    )[0],
-                    2
-                )
+                try:
 
-                socketio.emit("ltp", {
+                    ltp = round(
 
-                    "price": ltp
-                })
+                        struct.unpack(
+                            '<f',
+                            message[8:12]
+                        )[0],
 
-                candle = process_tick(ltp, 0)
-
-                if candle:
-
-                    socketio.emit(
-                        "candle",
-                        candle
+                        2
                     )
 
-            # =================================================
-            # MARKET DEPTH
-            # =================================================
+                    if ltp > 0:
+
+                        live_price = ltp
+
+                        socketio.emit(
+
+                            "ltp",
+
+                            {
+                                "price": ltp
+                            }
+                        )
+
+                        candle = process_tick(ltp)
+
+                        if candle:
+
+                            socketio.emit(
+
+                                "candle",
+
+                                candle
+                            )
+
+                except:
+                    pass
+
+            # =============================================
+            # DOM
+            # =============================================
 
             if len(message) > 200:
 
@@ -600,49 +670,62 @@ def start_dhan_ws():
 
                     offset = base + (i * 20)
 
-                    bid_qty = struct.unpack(
-                        '<I',
-                        message[offset:offset+4]
-                    )[0]
+                    try:
 
-                    bid_price = round(
-                        struct.unpack(
-                            '<f',
-                            message[offset+4:offset+8]
-                        )[0],
-                        2
-                    )
+                        bid_qty = struct.unpack(
 
-                    ask_qty = struct.unpack(
-                        '<I',
-                        message[offset+10:offset+14]
-                    )[0]
+                            '<I',
+                            message[offset:offset+4]
 
-                    ask_price = round(
-                        struct.unpack(
-                            '<f',
-                            message[offset+14:offset+18]
-                        )[0],
-                        2
-                    )
+                        )[0]
 
-                    bids.append({
+                        bid_price = round(
 
-                        "price": bid_price,
+                            struct.unpack(
+                                '<f',
+                                message[offset+4:offset+8]
+                            )[0],
 
-                        "qty": bid_qty,
+                            2
+                        )
 
-                        "orders": 1
-                    })
+                        ask_qty = struct.unpack(
 
-                    asks.append({
+                            '<I',
+                            message[offset+10:offset+14]
 
-                        "price": ask_price,
+                        )[0]
 
-                        "qty": ask_qty,
+                        ask_price = round(
 
-                        "orders": 1
-                    })
+                            struct.unpack(
+                                '<f',
+                                message[offset+14:offset+18]
+                            )[0],
+
+                            2
+                        )
+
+                        bids.append({
+
+                            "price": bid_price,
+
+                            "qty": bid_qty,
+
+                            "orders": i + 1
+                        })
+
+                        asks.append({
+
+                            "price": ask_price,
+
+                            "qty": ask_qty,
+
+                            "orders": i + 1
+                        })
+
+                    except:
+                        pass
 
                 live_dom = {
 
@@ -652,7 +735,9 @@ def start_dhan_ws():
                 }
 
                 socketio.emit(
+
                     "dom",
+
                     live_dom
                 )
 
@@ -666,7 +751,7 @@ def start_dhan_ws():
 
     def on_open(ws):
 
-        print("✅ Dhan WS Connected")
+        print("✅ DHAN WS CONNECTED")
 
         subscribe = {
 
@@ -685,9 +770,11 @@ def start_dhan_ws():
 
         time.sleep(1)
 
-        ws.send(json.dumps(subscribe))
+        ws.send(
+            json.dumps(subscribe)
+        )
 
-        print("✅ DOM Subscribed")
+        print("✅ DOM SUBSCRIBED")
 
     # =====================================================
     # ERROR
@@ -754,7 +841,17 @@ def start_ws_thread():
 @socketio.on("connect")
 def handle_connect():
 
-    print("🟢 Client Connected")
+    print("🟢 CLIENT CONNECTED")
+
+    emit_data = {
+
+        "price": live_price
+    }
+
+    socketio.emit(
+        "ltp",
+        emit_data
+    )
 
 # =========================================================
 # SOCKET DISCONNECT
@@ -763,10 +860,10 @@ def handle_connect():
 @socketio.on("disconnect")
 def handle_disconnect():
 
-    print("🔴 Client Disconnected")
+    print("🔴 CLIENT DISCONNECTED")
 
 # =========================================================
-# START WS
+# START WS THREAD
 # =========================================================
 
 start_ws_thread()
@@ -778,7 +875,10 @@ start_ws_thread()
 if __name__ == "__main__":
 
     port = int(
-        os.environ.get("PORT", 5000)
+        os.environ.get(
+            "PORT",
+            5000
+        )
     )
 
     socketio.run(
