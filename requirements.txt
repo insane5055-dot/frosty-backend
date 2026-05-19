@@ -8,3 +8,4 @@ requests
 pandas
 websocket-client
 pytz
+eventlet
