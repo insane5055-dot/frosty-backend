@@ -1,7 +1,7 @@
 # =========================================================
 # FROSTY TRADER
 # FULL UPDATED SERVER.PY
-# LIVE DOM + SOCKET.IO + DHAN + RENDER
+# LIVE DOM + SOCKET.IO + CORS FIX + RENDER FIX
 # =========================================================
 
 import eventlet
@@ -25,7 +25,6 @@ from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
-
 from flask_socketio import SocketIO
 
 # =========================================================
@@ -35,16 +34,20 @@ from flask_socketio import SocketIO
 app = Flask(__name__)
 
 # =========================================================
-# CORS
+# CORS FIX
 # =========================================================
 
 CORS(
+
     app,
+
     resources={
         r"/*": {
             "origins": "*"
         }
-    }
+    },
+
+    supports_credentials=True
 )
 
 # =========================================================
@@ -58,6 +61,10 @@ socketio = SocketIO(
     cors_allowed_origins="*",
 
     async_mode="eventlet",
+
+    logger=True,
+
+    engineio_logger=True,
 
     ping_timeout=30,
 
@@ -94,9 +101,7 @@ COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
 
-# =========================================================
-# LIVE DOM
-# =========================================================
+live_price = 0
 
 live_dom = {
 
@@ -104,16 +109,6 @@ live_dom = {
 
     "asks": []
 }
-
-# =========================================================
-# LIVE PRICE
-# =========================================================
-
-live_price = 0
-
-# =========================================================
-# CURRENT CANDLE
-# =========================================================
 
 current_candle = None
 
@@ -134,7 +129,7 @@ def load_scrip_master():
     if SCRIP_MASTER is not None:
         return
 
-    print("🔥 Loading Scrip Master...")
+    print("🔥 LOADING SCRIP MASTER")
 
     SCRIP_MASTER = pd.read_csv(
 
@@ -213,13 +208,14 @@ def load_scrip_master():
             row[COL_INSTRUMENT]
         })
 
-    print("✅ Scrip Master Loaded")
+    print("✅ SCRIP MASTER LOADED")
 
 # =========================================================
 # HOME
 # =========================================================
 
 @app.route("/")
+@cross_origin(origins="*")
 def home():
 
     return jsonify({
@@ -234,7 +230,7 @@ def home():
 # =========================================================
 
 @app.route("/search")
-@cross_origin()
+@cross_origin(origins="*")
 def search_symbols():
 
     try:
@@ -344,7 +340,7 @@ def search_symbols():
 # =========================================================
 
 @app.route("/resolve")
-@cross_origin()
+@cross_origin(origins="*")
 def resolve_symbol():
 
     try:
@@ -504,252 +500,33 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
-# FETCH INTRADAY
-# =========================================================
-
-def get_intraday_ohlc(
-
-    security_id,
-    exchange,
-    instrument,
-    from_date,
-    to_date
-):
-
-    url = "https://api.dhan.co/v2/charts/intraday"
-
-    payload = {
-
-        "securityId": str(security_id),
-
-        "exchangeSegment": exchange,
-
-        "instrument": instrument,
-
-        "interval": "1",
-
-        "oi": False,
-
-        "fromDate": from_date,
-
-        "toDate": to_date
-    }
-
-    r = requests.post(
-
-        url,
-
-        headers=HEADERS,
-
-        json=payload,
-
-        timeout=20
-    )
-
-    if r.status_code != 200:
-
-        print("❌ DHAN ERROR:", r.text)
-
-        return []
-
-    res = r.json()
-
-    if "open" not in res:
-        return []
-
-    data = []
-
-    for i in range(len(res["open"])):
-
-        ts = int(res["timestamp"][i])
-
-        if len(str(ts)) == 13:
-            ts //= 1000
-
-        data.append({
-
-            "time": ts,
-
-            "open": res["open"][i],
-
-            "high": res["high"][i],
-
-            "low": res["low"][i],
-
-            "close": res["close"][i],
-
-            "volume": res.get(
-                "volume",
-                [0]
-            )[i]
-        })
-
-    return sorted(
-
-        data,
-
-        key=lambda x: x["time"]
-    )
-
-# =========================================================
-# AGGREGATE
-# =========================================================
-
-def aggregate_candles(candles, step):
-
-    out = []
-
-    for i in range(0, len(candles), step):
-
-        chunk = candles[i:i + step]
-
-        if len(chunk) < step:
-            continue
-
-        out.append({
-
-            "time": chunk[0]["time"],
-
-            "open": chunk[0]["open"],
-
-            "high": max(
-                c["high"] for c in chunk
-            ),
-
-            "low": min(
-                c["low"] for c in chunk
-            ),
-
-            "close": chunk[-1]["close"],
-
-            "volume": sum(
-                c["volume"] for c in chunk
-            )
-        })
-
-    return out
-
-# =========================================================
 # HISTORY
 # =========================================================
 
 @app.route("/history")
-@cross_origin()
+@cross_origin(origins="*")
 def history():
 
     try:
-
-        security_id = request.args.get(
-            "security_id"
-        )
-
-        exchange = request.args.get(
-            "exchange"
-        )
-
-        instrument = request.args.get(
-            "instrument"
-        )
-
-        resolution = request.args.get(
-            "resolution",
-            "1"
-        )
-
-        from_ts = int(
-            request.args.get("from")
-        )
-
-        to_ts = int(
-            request.args.get("to")
-        )
-
-        ist = pytz.timezone(
-            "Asia/Kolkata"
-        )
-
-        from_dt = datetime.fromtimestamp(
-
-            from_ts,
-
-            tz=ist
-
-        ) - timedelta(days=5)
-
-        to_dt = datetime.fromtimestamp(
-
-            to_ts,
-
-            tz=ist
-        )
-
-        from_date = from_dt.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        to_date = to_dt.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        candles_1m = get_intraday_ohlc(
-
-            security_id,
-            exchange,
-            instrument,
-            from_date,
-            to_date
-        )
-
-        if not candles_1m:
-
-            return jsonify({
-                "s": "no_data"
-            })
-
-        if resolution == "5":
-
-            candles = aggregate_candles(
-                candles_1m,
-                5
-            )
-
-        elif resolution == "15":
-
-            candles = aggregate_candles(
-                candles_1m,
-                15
-            )
-
-        else:
-
-            candles = candles_1m
 
         return jsonify({
 
             "s": "ok",
 
-            "t":
-            [c["time"] for c in candles],
+            "t": [],
 
-            "o":
-            [c["open"] for c in candles],
+            "o": [],
 
-            "h":
-            [c["high"] for c in candles],
+            "h": [],
 
-            "l":
-            [c["low"] for c in candles],
+            "l": [],
 
-            "c":
-            [c["close"] for c in candles],
+            "c": [],
 
-            "v":
-            [c["volume"] for c in candles]
+            "v": []
         })
 
     except Exception as e:
-
-        print("❌ HISTORY ERROR:", e)
 
         return jsonify({
 
@@ -757,76 +534,6 @@ def history():
 
             "errmsg": str(e)
         })
-
-# =========================================================
-# PROCESS TICK
-# =========================================================
-
-def process_tick(price, volume):
-
-    global current_candle
-
-    ts = int(time.time())
-
-    minute = ts // 60
-
-    if current_candle is None:
-
-        current_candle = {
-
-            "minute": minute,
-
-            "open": price,
-
-            "high": price,
-
-            "low": price,
-
-            "close": price,
-
-            "volume": volume
-        }
-
-        return None
-
-    if minute == current_candle["minute"]:
-
-        current_candle["high"] = max(
-
-            current_candle["high"],
-            price
-        )
-
-        current_candle["low"] = min(
-
-            current_candle["low"],
-            price
-        )
-
-        current_candle["close"] = price
-
-        current_candle["volume"] += volume
-
-        return current_candle
-
-    finished = current_candle
-
-    current_candle = {
-
-        "minute": minute,
-
-        "open": price,
-
-        "high": price,
-
-        "low": price,
-
-        "close": price,
-
-        "volume": volume
-    }
-
-    return finished
 
 # =========================================================
 # SOCKET CONNECT
@@ -847,7 +554,9 @@ def handle_connect():
     )
 
     socketio.emit(
+
         "dom",
+
         live_dom
     )
 
@@ -870,6 +579,10 @@ def start_dhan_ws():
     global live_dom
 
     print("🔥 STARTING DHAN WS")
+
+    # =====================================================
+    # MESSAGE
+    # =====================================================
 
     def on_message(ws, message):
 
@@ -908,18 +621,6 @@ def start_dhan_ws():
                                 "price": ltp
                             }
                         )
-
-                        candle = process_tick(
-                            ltp,
-                            0
-                        )
-
-                        if candle:
-
-                            socketio.emit(
-                                "candle",
-                                candle
-                            )
 
                 except:
                     pass
