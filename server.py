@@ -1,5 +1,6 @@
 # =========================================================
 # ULTRA FAST FINAL SERVER.PY
+# WITH LIVE FLOATING DOM
 # =========================================================
 
 from gevent import monkey
@@ -56,7 +57,9 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mjg4ODc3LCJpYXQiOjE3NzkyMDI0NzcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.vPSfT9wLzkLqvBRukg3D9oH3PPeb5qDaKgGHB2b5BLxZl7P1d2-nPwbpvu7lBTzQBSNsmdKYZ5czDXB-EqrrHg"
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
+
+CLIENT_ID = "YOUR_CLIENT_ID"
 
 HEADERS = {
     "Accept": "application/json",
@@ -76,6 +79,21 @@ COL_DISPLAY = None
 COL_SECURITY = None
 COL_EXCHANGE = None
 COL_INSTRUMENT = None
+
+# =========================================================
+# LIVE DOM
+# =========================================================
+
+live_dom = {
+    "bids": [],
+    "asks": []
+}
+
+# =========================================================
+# CURRENT CANDLE
+# =========================================================
+
+current_candle = None
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -125,28 +143,16 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
-    # =====================================================
-    # CLEAN DATA
-    # =====================================================
-
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
-
-    # =====================================================
-    # PREPROCESS
-    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
-
-    # =====================================================
-    # FAST SEARCH CACHE
-    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -349,10 +355,6 @@ def resolve_symbol():
         row = row.iloc[0]
 
         instrument = str(row[COL_INSTRUMENT])
-
-        # =================================================
-        # EXCHANGE SEGMENT
-        # =================================================
 
         if "INDEX" in instrument:
 
@@ -664,10 +666,8 @@ def history():
         })
 
 # =========================================================
-# LIVE WEBSOCKET
+# PROCESS TICK
 # =========================================================
-
-current_candle = None
 
 def process_tick(price, volume):
 
@@ -743,33 +743,117 @@ def start_dhan_ws():
 
     def on_message(ws, message):
 
+        global live_dom
+
         try:
 
             packet_type = message[0]
 
-            if packet_type != 2:
-                return
+            # =================================================
+            # LIVE LTP
+            # =================================================
 
-            ltp = round(
-                struct.unpack(
-                    '<f',
-                    message[8:12]
-                )[0],
-                2
-            )
+            if packet_type == 2:
 
-            candle = process_tick(ltp, 0)
+                ltp = round(
+                    struct.unpack(
+                        '<f',
+                        message[8:12]
+                    )[0],
+                    2
+                )
 
-            if candle:
+                socketio.emit("ltp", {
+                    "price": ltp
+                })
+
+                candle = process_tick(ltp, 0)
+
+                if candle:
+
+                    socketio.emit(
+                        "candle",
+                        candle
+                    )
+
+            # =================================================
+            # MARKET DEPTH
+            # =================================================
+
+            if len(message) > 200:
+
+                bids = []
+                asks = []
+
+                base = 64
+
+                for i in range(5):
+
+                    offset = base + (i * 20)
+
+                    bid_qty = struct.unpack(
+                        '<I',
+                        message[offset:offset+4]
+                    )[0]
+
+                    bid_price = round(
+                        struct.unpack(
+                            '<f',
+                            message[offset+4:offset+8]
+                        )[0],
+                        2
+                    )
+
+                    ask_qty = struct.unpack(
+                        '<I',
+                        message[offset+10:offset+14]
+                    )[0]
+
+                    ask_price = round(
+                        struct.unpack(
+                            '<f',
+                            message[offset+14:offset+18]
+                        )[0],
+                        2
+                    )
+
+                    bids.append({
+
+                        "price": bid_price,
+
+                        "qty": bid_qty,
+
+                        "orders": 1
+                    })
+
+                    asks.append({
+
+                        "price": ask_price,
+
+                        "qty": ask_qty,
+
+                        "orders": 1
+                    })
+
+                live_dom = {
+
+                    "bids": bids,
+
+                    "asks": asks
+                }
 
                 socketio.emit(
-                    "candle",
-                    candle
+                    "dom",
+                    live_dom
                 )
 
         except Exception as e:
 
-            print("❌ WS DECODE ERROR:", e)
+            print("❌ WS ERROR:", e)
+
+    # =====================================================
+    # OPEN
+    # =====================================================
 
     def on_open(ws):
 
@@ -777,7 +861,7 @@ def start_dhan_ws():
 
         subscribe = {
 
-            "RequestCode": 15,
+            "RequestCode": 21,
 
             "InstrumentCount": 1,
 
@@ -793,9 +877,19 @@ def start_dhan_ws():
 
         ws.send(json.dumps(subscribe))
 
+        print("✅ DOM Subscribed")
+
+    # =====================================================
+    # ERROR
+    # =====================================================
+
     def on_error(ws, error):
 
         print("❌ DHAN WS ERROR:", error)
+
+    # =====================================================
+    # CLOSE
+    # =====================================================
 
     def on_close(ws, a, b):
 
@@ -805,9 +899,13 @@ def start_dhan_ws():
 
         start_ws_thread()
 
+    # =====================================================
+    # CONNECT
+    # =====================================================
+
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
 
         on_message=on_message,
 
