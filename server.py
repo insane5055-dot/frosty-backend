@@ -1,11 +1,11 @@
 # =========================================================
 # FROSTY TRADER
-# LIVE FLOATING DOM SERVER
-# RENDER + SOCKET.IO + DHAN WS
+# FULL UPDATED SERVER.PY
+# LIVE DOM + SOCKET.IO + DHAN + RENDER
 # =========================================================
 
-from gevent import monkey
-monkey.patch_all()
+import eventlet
+eventlet.monkey_patch()
 
 # =========================================================
 # IMPORTS
@@ -18,6 +18,7 @@ import struct
 import threading
 import requests
 import pandas as pd
+import pytz
 import websocket
 
 from datetime import datetime, timedelta
@@ -56,9 +57,7 @@ socketio = SocketIO(
 
     cors_allowed_origins="*",
 
-    async_mode="gevent",
-
-    transports=["websocket"],
+    async_mode="eventlet",
 
     ping_timeout=30,
 
@@ -69,9 +68,9 @@ socketio = SocketIO(
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mjg4ODc3LCJpYXQiOjE3NzkyMDI0NzcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.vPSfT9wLzkLqvBRukg3D9oH3PPeb5qDaKgGHB2b5BLxZl7P1d2-nPwbpvu7lBTzQBSNsmdKYZ5czDXB-EqrrHg"
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
 
-CLIENT_ID = "1101310334"
+CLIENT_ID = "YOUR_CLIENT_ID"
 
 HEADERS = {
 
@@ -357,6 +356,8 @@ def resolve_symbol():
             ""
         ).upper().strip()
 
+        print("📌 RESOLVE:", symbol_raw)
+
         if ":" in symbol_raw:
 
             exchange_param, symbol = (
@@ -468,8 +469,15 @@ def resolve_symbol():
             "has_daily":
             True,
 
-            "supported_resolutions":
-            ["1", "5", "15"],
+            "has_weekly_and_monthly":
+            True,
+
+            "supported_resolutions": [
+
+                "1",
+                "5",
+                "15"
+            ],
 
             "data_status":
             "streaming",
@@ -496,6 +504,132 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
+# FETCH INTRADAY
+# =========================================================
+
+def get_intraday_ohlc(
+
+    security_id,
+    exchange,
+    instrument,
+    from_date,
+    to_date
+):
+
+    url = "https://api.dhan.co/v2/charts/intraday"
+
+    payload = {
+
+        "securityId": str(security_id),
+
+        "exchangeSegment": exchange,
+
+        "instrument": instrument,
+
+        "interval": "1",
+
+        "oi": False,
+
+        "fromDate": from_date,
+
+        "toDate": to_date
+    }
+
+    r = requests.post(
+
+        url,
+
+        headers=HEADERS,
+
+        json=payload,
+
+        timeout=20
+    )
+
+    if r.status_code != 200:
+
+        print("❌ DHAN ERROR:", r.text)
+
+        return []
+
+    res = r.json()
+
+    if "open" not in res:
+        return []
+
+    data = []
+
+    for i in range(len(res["open"])):
+
+        ts = int(res["timestamp"][i])
+
+        if len(str(ts)) == 13:
+            ts //= 1000
+
+        data.append({
+
+            "time": ts,
+
+            "open": res["open"][i],
+
+            "high": res["high"][i],
+
+            "low": res["low"][i],
+
+            "close": res["close"][i],
+
+            "volume": res.get(
+                "volume",
+                [0]
+            )[i]
+        })
+
+    return sorted(
+
+        data,
+
+        key=lambda x: x["time"]
+    )
+
+# =========================================================
+# AGGREGATE
+# =========================================================
+
+def aggregate_candles(candles, step):
+
+    out = []
+
+    for i in range(0, len(candles), step):
+
+        chunk = candles[i:i + step]
+
+        if len(chunk) < step:
+            continue
+
+        out.append({
+
+            "time": chunk[0]["time"],
+
+            "open": chunk[0]["open"],
+
+            "high": max(
+                c["high"] for c in chunk
+            ),
+
+            "low": min(
+                c["low"] for c in chunk
+            ),
+
+            "close": chunk[-1]["close"],
+
+            "volume": sum(
+                c["volume"] for c in chunk
+            )
+        })
+
+    return out
+
+# =========================================================
 # HISTORY
 # =========================================================
 
@@ -505,24 +639,117 @@ def history():
 
     try:
 
+        security_id = request.args.get(
+            "security_id"
+        )
+
+        exchange = request.args.get(
+            "exchange"
+        )
+
+        instrument = request.args.get(
+            "instrument"
+        )
+
+        resolution = request.args.get(
+            "resolution",
+            "1"
+        )
+
+        from_ts = int(
+            request.args.get("from")
+        )
+
+        to_ts = int(
+            request.args.get("to")
+        )
+
+        ist = pytz.timezone(
+            "Asia/Kolkata"
+        )
+
+        from_dt = datetime.fromtimestamp(
+
+            from_ts,
+
+            tz=ist
+
+        ) - timedelta(days=5)
+
+        to_dt = datetime.fromtimestamp(
+
+            to_ts,
+
+            tz=ist
+        )
+
+        from_date = from_dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        to_date = to_dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        candles_1m = get_intraday_ohlc(
+
+            security_id,
+            exchange,
+            instrument,
+            from_date,
+            to_date
+        )
+
+        if not candles_1m:
+
+            return jsonify({
+                "s": "no_data"
+            })
+
+        if resolution == "5":
+
+            candles = aggregate_candles(
+                candles_1m,
+                5
+            )
+
+        elif resolution == "15":
+
+            candles = aggregate_candles(
+                candles_1m,
+                15
+            )
+
+        else:
+
+            candles = candles_1m
+
         return jsonify({
 
             "s": "ok",
 
-            "t": [],
+            "t":
+            [c["time"] for c in candles],
 
-            "o": [],
+            "o":
+            [c["open"] for c in candles],
 
-            "h": [],
+            "h":
+            [c["high"] for c in candles],
 
-            "l": [],
+            "l":
+            [c["low"] for c in candles],
 
-            "c": [],
+            "c":
+            [c["close"] for c in candles],
 
-            "v": []
+            "v":
+            [c["volume"] for c in candles]
         })
 
     except Exception as e:
+
+        print("❌ HISTORY ERROR:", e)
 
         return jsonify({
 
@@ -535,7 +762,7 @@ def history():
 # PROCESS TICK
 # =========================================================
 
-def process_tick(price):
+def process_tick(price, volume):
 
     global current_candle
 
@@ -555,7 +782,9 @@ def process_tick(price):
 
             "low": price,
 
-            "close": price
+            "close": price,
+
+            "volume": volume
         }
 
         return None
@@ -576,6 +805,8 @@ def process_tick(price):
 
         current_candle["close"] = price
 
+        current_candle["volume"] += volume
+
         return current_candle
 
     finished = current_candle
@@ -590,18 +821,55 @@ def process_tick(price):
 
         "low": price,
 
-        "close": price
+        "close": price,
+
+        "volume": volume
     }
 
     return finished
 
 # =========================================================
-# DHAN WS
+# SOCKET CONNECT
+# =========================================================
+
+@socketio.on("connect")
+def handle_connect():
+
+    print("🟢 CLIENT CONNECTED")
+
+    socketio.emit(
+
+        "ltp",
+
+        {
+            "price": live_price
+        }
+    )
+
+    socketio.emit(
+        "dom",
+        live_dom
+    )
+
+# =========================================================
+# SOCKET DISCONNECT
+# =========================================================
+
+@socketio.on("disconnect")
+def handle_disconnect():
+
+    print("🔴 CLIENT DISCONNECTED")
+
+# =========================================================
+# DHAN WEBSOCKET
 # =========================================================
 
 def start_dhan_ws():
 
-    print("🔥 Starting Dhan WS...")
+    global live_price
+    global live_dom
+
+    print("🔥 STARTING DHAN WS")
 
     def on_message(ws, message):
 
@@ -611,7 +879,7 @@ def start_dhan_ws():
         try:
 
             # =============================================
-            # LIVE PRICE
+            # LTP
             # =============================================
 
             if len(message) >= 12:
@@ -641,14 +909,15 @@ def start_dhan_ws():
                             }
                         )
 
-                        candle = process_tick(ltp)
+                        candle = process_tick(
+                            ltp,
+                            0
+                        )
 
                         if candle:
 
                             socketio.emit(
-
                                 "candle",
-
                                 candle
                             )
 
@@ -835,35 +1104,7 @@ def start_ws_thread():
     ).start()
 
 # =========================================================
-# SOCKET CONNECT
-# =========================================================
-
-@socketio.on("connect")
-def handle_connect():
-
-    print("🟢 CLIENT CONNECTED")
-
-    emit_data = {
-
-        "price": live_price
-    }
-
-    socketio.emit(
-        "ltp",
-        emit_data
-    )
-
-# =========================================================
-# SOCKET DISCONNECT
-# =========================================================
-
-@socketio.on("disconnect")
-def handle_disconnect():
-
-    print("🔴 CLIENT DISCONNECTED")
-
-# =========================================================
-# START WS THREAD
+# START WS
 # =========================================================
 
 start_ws_thread()
