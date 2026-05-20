@@ -1,7 +1,18 @@
 # =========================================================
 # FROSTY TRADER
-# FULL FINAL UPDATED SERVER.PY
-# LIVE DOM + TRADINGVIEW + SOCKET.IO + RENDER
+# ULTRA FULL UPDATED SERVER.PY
+# LIVE DOM + TRADINGVIEW + SOCKET.IO + DHAN + HISTORY
+# =========================================================
+
+import os
+import json
+import time
+import struct
+import threading
+from datetime import datetime, timedelta
+
+# =========================================================
+# EVENTLET
 # =========================================================
 
 import eventlet
@@ -11,17 +22,10 @@ eventlet.monkey_patch()
 # IMPORTS
 # =========================================================
 
-import os
-import json
-import time
-import struct
-import threading
+import pytz
 import requests
 import pandas as pd
-import pytz
 import websocket
-
-from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
@@ -94,15 +98,6 @@ HEADERS = {
 # GLOBALS
 # =========================================================
 
-SCRIP_MASTER = None
-
-SEARCH_CACHE = []
-
-COL_DISPLAY = None
-COL_SECURITY = None
-COL_EXCHANGE = None
-COL_INSTRUMENT = None
-
 live_price = 0
 
 live_dom = {
@@ -113,6 +108,15 @@ live_dom = {
 }
 
 current_candle = None
+
+SCRIP_MASTER = None
+
+SEARCH_CACHE = []
+
+COL_DISPLAY = None
+COL_SECURITY = None
+COL_EXCHANGE = None
+COL_INSTRUMENT = None
 
 # =========================================================
 # LOAD SCRIP MASTER
@@ -224,7 +228,7 @@ def home():
 
         "status": "running",
 
-        "socket": "active"
+        "websocket": "active"
     })
 
 # =========================================================
@@ -350,8 +354,10 @@ def resolve_symbol():
         load_scrip_master()
 
         symbol_raw = request.args.get(
+
             "symbol",
-            ""
+
+            "NSE:NIFTY 50"
         ).upper().strip()
 
         print("📌 RESOLVE:", symbol_raw)
@@ -359,6 +365,7 @@ def resolve_symbol():
         if ":" in symbol_raw:
 
             exchange_param, symbol = (
+
                 symbol_raw.split(":", 1)
             )
 
@@ -540,6 +547,70 @@ def history():
         })
 
 # =========================================================
+# PROCESS TICK
+# =========================================================
+
+def process_tick(price):
+
+    global current_candle
+
+    ts = int(time.time())
+
+    minute = ts // 60
+
+    if current_candle is None:
+
+        current_candle = {
+
+            "minute": minute,
+
+            "open": price,
+
+            "high": price,
+
+            "low": price,
+
+            "close": price
+        }
+
+        return None
+
+    if minute == current_candle["minute"]:
+
+        current_candle["high"] = max(
+
+            current_candle["high"],
+            price
+        )
+
+        current_candle["low"] = min(
+
+            current_candle["low"],
+            price
+        )
+
+        current_candle["close"] = price
+
+        return current_candle
+
+    finished = current_candle
+
+    current_candle = {
+
+        "minute": minute,
+
+        "open": price,
+
+        "high": price,
+
+        "low": price,
+
+        "close": price
+    }
+
+    return finished
+
+# =========================================================
 # SOCKET CONNECT
 # =========================================================
 
@@ -574,7 +645,7 @@ def handle_disconnect():
     print("🔴 CLIENT DISCONNECTED")
 
 # =========================================================
-# DHAN WEBSOCKET
+# DHAN WS
 # =========================================================
 
 def start_dhan_ws():
@@ -606,7 +677,7 @@ def start_dhan_ws():
                     ltp = round(
 
                         struct.unpack(
-                            '<f',
+                            "<f",
                             message[8:12]
                         )[0],
 
@@ -625,6 +696,17 @@ def start_dhan_ws():
                                 "price": ltp
                             }
                         )
+
+                        candle = process_tick(
+                            ltp
+                        )
+
+                        if candle:
+
+                            socketio.emit(
+                                "candle",
+                                candle
+                            )
 
                 except Exception as e:
 
@@ -649,7 +731,8 @@ def start_dhan_ws():
 
                         bid_qty = struct.unpack(
 
-                            '<I',
+                            "<I",
+
                             message[offset:offset+4]
 
                         )[0]
@@ -657,7 +740,7 @@ def start_dhan_ws():
                         bid_price = round(
 
                             struct.unpack(
-                                '<f',
+                                "<f",
                                 message[offset+4:offset+8]
                             )[0],
 
@@ -666,7 +749,8 @@ def start_dhan_ws():
 
                         ask_qty = struct.unpack(
 
-                            '<I',
+                            "<I",
+
                             message[offset+10:offset+14]
 
                         )[0]
@@ -674,7 +758,7 @@ def start_dhan_ws():
                         ask_price = round(
 
                             struct.unpack(
-                                '<f',
+                                "<f",
                                 message[offset+14:offset+18]
                             )[0],
 
@@ -811,7 +895,7 @@ def start_ws_thread():
     ).start()
 
 # =========================================================
-# START WS
+# START DHAN WS
 # =========================================================
 
 start_ws_thread()
@@ -823,8 +907,11 @@ start_ws_thread()
 if __name__ == "__main__":
 
     port = int(
+
         os.environ.get(
+
             "PORT",
+
             5000
         )
     )
