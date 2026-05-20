@@ -1,5 +1,5 @@
 # =========================================================
-# ULTRA FAST FINAL SERVER.PY
+# OPTIMIZED SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -20,12 +20,15 @@ from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
+from flask_compress import Compress
 
 # =========================================================
 # FLASK APP
 # =========================================================
 
 app = Flask(__name__)
+
+Compress(app)
 
 # =========================================================
 # CORS
@@ -51,21 +54,27 @@ socketio = SocketIO(
     async_mode="gevent",
     ping_timeout=30,
     ping_interval=25,
-    logger=True,
-    engineio_logger=True
+    logger=False,
+    engineio_logger=False
 )
 
 # =========================================================
 # DHAN CONFIG
 # =========================================================
 
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mjg4ODc3LCJpYXQiOjE3NzkyMDI0NzcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.vPSfT9wLzkLqvBRukg3D9oH3PPeb5qDaKgGHB2b5BLxZl7P1d2-nPwbpvu7lBTzQBSNsmdKYZ5czDXB-EqrrHg"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mzc1NDg2LCJpYXQiOjE3NzkyODkwODYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.VZecrKHm_B3gRv5Wlb24HgYPa2L8F2xxlnYXBn_6X-EeMhV9J-tUTrYlm5fn5n3d3xhUXrDJ2ximisERp8EMNA"
 
 HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
     "access-token": ACCESS_TOKEN
 }
+
+# =========================================================
+# REQUEST SESSION
+# =========================================================
+
+session = requests.Session()
 
 # =========================================================
 # GLOBALS
@@ -313,15 +322,9 @@ def resolve_symbol():
             exchange_param = ""
             symbol = symbol_raw
 
-        df = SCRIP_MASTER.copy()
-
-        df["MATCH"] = (
-            df[COL_DISPLAY]
-            .astype(str)
-            .str.upper()
-        )
-
-        row = df[df["MATCH"] == symbol]
+        row = SCRIP_MASTER[
+            SCRIP_MASTER["DISPLAY_UPPER"] == symbol
+        ]
 
         if exchange_param:
 
@@ -465,7 +468,7 @@ def get_intraday_ohlc(
         "toDate": to_date
     }
 
-    r = requests.post(
+    r = session.post(
         url,
         headers=HEADERS,
         json=payload,
@@ -830,6 +833,8 @@ def start_ws_thread():
 # =========================================================
 
 if __name__ == "__main__":
+
+    load_scrip_master()
 
     start_ws_thread()
 
