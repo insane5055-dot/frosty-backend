@@ -425,11 +425,21 @@ def resolve_symbol():
 
         else:
 
-            exchange_segment = "NSE_EQ"
+    # =============================================
+    # NSE / BSE EQUITY
+    # =============================================
 
-            pricescale = 100
+    if str(row[COL_EXCHANGE]) == "BSE":
 
-            tv_type = "stock"
+        exchange_segment = "BSE_EQ"
+
+    else:
+
+        exchange_segment = "NSE_EQ"
+
+    pricescale = 100
+
+    tv_type = "stock"
 
         print("✅ RESOLVED:", row[COL_DISPLAY])
 
