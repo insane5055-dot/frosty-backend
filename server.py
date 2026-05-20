@@ -1,807 +1,572 @@
-# =========================================================
-# FINAL FIXED SERVER.PY
-# =========================================================
-
-from gevent import monkey
-monkey.patch_all()
-
-import os
-import json
-import time
-import struct
-import threading
-import requests
-import pandas as pd
-import pytz
-import websocket
-
-from datetime import datetime, timedelta
-
-from flask import Flask, jsonify, request
-from flask_cors import CORS, cross_origin
-from flask_socketio import SocketIO
-
-# =========================================================
-# FLASK
-# =========================================================
-
-app = Flask(__name__)
-
-CORS(
-    app,
-    resources={
-        r"/*": {
-            "origins": "*"
-        }
-    }
-)
-
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode="gevent",
-    ping_timeout=30,
-    ping_interval=25
-)
-
-# =========================================================
-# DHAN CONFIG
-# =========================================================
-
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mzc1NDg2LCJpYXQiOjE3NzkyODkwODYsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.VZecrKHm_B3gRv5Wlb24HgYPa2L8F2xxlnYXBn_6X-EeMhV9J-tUTrYlm5fn5n3d3xhUXrDJ2ximisERp8EMNA"
-
-CLIENT_ID = "1101310334"
-
-HEADERS = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    "access-token": ACCESS_TOKEN
-}
-
-# =========================================================
-# GLOBALS
-# =========================================================
-
-SCRIP_MASTER = None
-
-SEARCH_CACHE = []
-
-COL_DISPLAY = None
-COL_SECURITY = None
-COL_EXCHANGE = None
-COL_INSTRUMENT = None
+// =========================================================
+// GLOBALS
+// =========================================================
 
-# =========================================================
-# LOAD SCRIP MASTER
-# =========================================================
+let searchTimeout = null;
 
-def load_scrip_master():
+let lastSearchId = 0;
 
-    global SCRIP_MASTER
-    global SEARCH_CACHE
+const BASE_URL =
+    "https://frosty-backend-4mox.onrender.com";
 
-    global COL_DISPLAY
-    global COL_SECURITY
-    global COL_EXCHANGE
-    global COL_INSTRUMENT
+// =========================================================
+// SOCKET
+// =========================================================
 
-    if SCRIP_MASTER is not None:
-        return
+let socket = null;
 
-    print("🔥 Loading Scrip Master...")
+let currentSubscriber = null;
 
-    SCRIP_MASTER = pd.read_csv(
-        "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
-        low_memory=False
-    )
+// =========================================================
+// DATAFEED
+// =========================================================
 
-    SCRIP_MASTER.columns = (
-        SCRIP_MASTER.columns.str.upper()
-    )
+const Datafeed = {
 
-    COL_DISPLAY = next(
-        c for c in SCRIP_MASTER.columns
-        if "DISPLAY" in c
-    )
+    // =====================================================
+    // ON READY
+    // =====================================================
 
-    COL_SECURITY = next(
-        c for c in SCRIP_MASTER.columns
-        if "SECURITY" in c
-    )
+    onReady: (callback) => {
 
-    COL_EXCHANGE = next(
-        c for c in SCRIP_MASTER.columns
-        if "EXCH" in c
-    )
+        console.log("✅ Datafeed Ready");
 
-    COL_INSTRUMENT = next(
-        c for c in SCRIP_MASTER.columns
-        if "INSTRUMENT" in c
-    )
+        setTimeout(() => {
 
-    SCRIP_MASTER.dropna(
-        subset=[COL_DISPLAY],
-        inplace=True
-    )
+            callback({
 
-    SCRIP_MASTER["DISPLAY_UPPER"] = (
-        SCRIP_MASTER[COL_DISPLAY]
-        .astype(str)
-        .str.upper()
-    )
+                supported_resolutions: [
 
-    for _, row in SCRIP_MASTER.iterrows():
+                    "1",
+                    "5",
+                    "15"
+                ],
 
-        exchange = str(row[COL_EXCHANGE])
+                exchanges: [
 
-        if exchange not in [
-            "NSE",
-            "BSE",
-            "NSE_FNO",
-            "IDX_I"
-        ]:
-            continue
+                    {
+                        value: "NSE",
+                        name: "NSE",
+                        desc: "NSE"
+                    },
 
-        SEARCH_CACHE.append({
+                    {
+                        value: "IDX_I",
+                        name: "INDEX",
+                        desc: "INDEX"
+                    }
+                ],
 
-            "display_upper":
-            str(row[COL_DISPLAY]).upper(),
+                symbols_types: [
 
-            "symbol":
-            row[COL_DISPLAY],
+                    {
+                        name: "stock",
+                        value: "stock"
+                    },
 
-            "exchange":
-            exchange,
+                    {
+                        name: "index",
+                        value: "index"
+                    }
+                ],
 
-            "instrument":
-            row[COL_INSTRUMENT]
-        })
+                supports_search: true,
 
-    print("✅ Scrip Master Loaded")
+                supports_group_request: false,
 
-# =========================================================
-# HOME
-# =========================================================
+                supports_marks: false,
 
-@app.route("/")
-def home():
+                supports_timescale_marks: false,
 
-    return "Backend running OK"
+                supports_time: true
+            });
 
-# =========================================================
-# SEARCH
-# =========================================================
+        }, 0);
+    },
 
-@app.route("/search")
-@cross_origin()
-def search_symbols():
+    // =====================================================
+    // SEARCH SYMBOLS
+    // =====================================================
 
-    try:
+    searchSymbols: (
 
-        load_scrip_master()
+        userInput,
+        exchange,
+        symbolType,
+        onResultReadyCallback
 
-        q = request.args.get(
-            "q",
-            ""
-        ).upper().strip()
+    ) => {
 
-        if not q:
-            return jsonify([])
+        clearTimeout(searchTimeout);
 
-        exact = []
-        starts = []
-        contains = []
+        searchTimeout = setTimeout(async () => {
 
-        for item in SEARCH_CACHE:
+            try {
 
-            name = item["display_upper"]
+                const searchId = ++lastSearchId;
 
-            if name == q:
+                console.log(
+                    "🔍 Searching:",
+                    userInput
+                );
 
-                exact.append(item)
+                const res = await fetch(
 
-            elif name.startswith(q):
+                    `${BASE_URL}/search?q=${encodeURIComponent(userInput)}`
+                );
 
-                starts.append(item)
+                const data = await res.json();
 
-            elif q in name:
-
-                contains.append(item)
-
-        final = (
-            exact[:5] +
-            starts[:10] +
-            contains[:10]
-        )
-
-        results = []
-
-        for item in final:
-
-            instr = str(item["instrument"])
-
-            # =============================================
-            # TV TYPE
-            # =============================================
-
-            if "INDEX" in instr:
-
-                tv_type = "index"
-
-            elif instr in [
-                "FUTIDX",
-                "FUTSTK"
-            ]:
-
-                tv_type = "futures"
-
-            elif instr in [
-                "OPTIDX",
-                "OPTSTK"
-            ]:
-
-                tv_type = "option"
-
-            else:
-
-                tv_type = "stock"
-
-            results.append({
-
-                "symbol":
-                item["symbol"],
-
-                "ticker":
-                f"{item['exchange']}:{item['symbol']}",
-
-                "full_name":
-                f"{item['exchange']}:{item['symbol']}",
-
-                "description":
-                item["symbol"],
-
-                "exchange":
-                item["exchange"],
-
-                "type":
-                tv_type
-            })
-
-        return jsonify(results)
-
-    except Exception as e:
-
-        print("❌ SEARCH ERROR:", e)
-
-        return jsonify([])
-
-# =========================================================
-# RESOLVE
-# =========================================================
-
-@app.route("/resolve")
-@cross_origin()
-def resolve_symbol():
-
-    try:
-
-        load_scrip_master()
-
-        symbol_raw = request.args.get(
-            "symbol",
-            ""
-        ).upper().strip()
-
-        print("📌 RESOLVE:", symbol_raw)
-
-        if ":" in symbol_raw:
-
-            exchange_param, symbol = (
-                symbol_raw.split(":", 1)
-            )
-
-        else:
-
-            exchange_param = ""
-            symbol = symbol_raw
-
-        symbol = symbol.replace(" ", "")
-
-        df = SCRIP_MASTER.copy()
-
-        df["MATCH"] = (
-            df[COL_DISPLAY]
-            .astype(str)
-            .str.upper()
-            .str.replace(" ", "")
-        )
-
-        row = df[df["MATCH"] == symbol]
-
-        if exchange_param:
-
-            row = row[
-                row[COL_EXCHANGE] == exchange_param
-            ]
-
-        if row.empty:
-
-            return jsonify({
-                "error": "symbol not found"
-            }), 404
-
-        row = row.iloc[0]
-
-        instrument = str(row[COL_INSTRUMENT])
-
-        # =============================================
-        # EXCHANGE SEGMENT
-        # =============================================
-
-        if "INDEX" in instrument:
-
-            exchange_segment = "IDX_I"
-            pricescale = 1
-            tv_type = "index"
-
-        elif instrument in [
-            "OPTIDX",
-            "FUTIDX",
-            "OPTSTK",
-            "FUTSTK"
-        ]:
-
-            exchange_segment = "NSE_FNO"
-            pricescale = 100
-
-            if "FUT" in instrument:
-                tv_type = "futures"
-            else:
-                tv_type = "option"
-
-        else:
-
-            exchange_segment = "NSE_EQ"
-            pricescale = 100
-            tv_type = "stock"
-
-        print("✅ RESOLVED:", row[COL_DISPLAY])
-
-        return jsonify({
-
-            "name":
-            row[COL_DISPLAY],
-
-            "ticker":
-            f"{row[COL_EXCHANGE]}:{row[COL_DISPLAY]}",
-
-            "description":
-            row[COL_DISPLAY],
-
-            "type":
-            tv_type,
-
-            "session":
-            "0915-1530",
-
-            "timezone":
-            "Asia/Kolkata",
-
-            "exchange":
-            row[COL_EXCHANGE],
-
-            "minmov":
-            1,
-
-            "pricescale":
-            pricescale,
-
-            "has_intraday":
-            True,
-
-            "has_daily":
-            True,
-
-            "has_weekly_and_monthly":
-            True,
-
-            "supported_resolutions":
-            ["1", "5", "15"],
-
-            "volume_precision":
-            2,
-
-            "data_status":
-            "streaming",
-
-            "security_id":
-            str(row[COL_SECURITY]),
-
-            "instrument":
-            instrument,
-
-            "exchange_segment":
-            exchange_segment
-        })
-
-    except Exception as e:
-
-        print("❌ RESOLVE ERROR:", str(e))
-
-        return jsonify({
-            "error": str(e)
-        }), 500
-
-# =========================================================
-# FETCH OHLC
-# =========================================================
-
-def get_intraday_ohlc(
-    security_id,
-    exchange,
-    instrument,
-    from_date,
-    to_date,
-    resolution
-):
-
-    url = "https://api.dhan.co/v2/charts/intraday"
-
-    payload = {
-
-        "securityId": str(security_id),
-
-        "exchangeSegment": exchange,
-
-        "instrument": instrument,
-
-        "interval": resolution,
-
-        "oi": False,
-
-        "fromDate": from_date,
-
-        "toDate": to_date
-    }
-
-    print("📤 DHAN PAYLOAD:", payload)
-
-    r = requests.post(
-        url,
-        headers=HEADERS,
-        json=payload,
-        timeout=20
-    )
-
-    print("📥 DHAN STATUS:", r.status_code)
-
-    if r.status_code != 200:
-
-        print("❌ DHAN ERROR:", r.text)
-
-        return []
-
-    res = r.json()
-
-    print("📦 DHAN RESPONSE:", list(res.keys()))
-
-    if "open" not in res:
-
-        print("❌ NO OHLC DATA")
-
-        return []
-
-    data = []
-
-    for i in range(len(res["open"])):
-
-        ts = int(res["timestamp"][i])
-
-        if len(str(ts)) == 13:
-            ts //= 1000
-
-        data.append({
-
-            "time": ts,
-
-            "open": res["open"][i],
-
-            "high": res["high"][i],
-
-            "low": res["low"][i],
-
-            "close": res["close"][i],
-
-            "volume": (
-                res.get("volume", [0] * len(res["open"]))[i]
-            )
-        })
-
-    print("✅ CANDLES:", len(data))
-
-    return data
-
-# =========================================================
-# HISTORY
-# =========================================================
-
-@app.route("/history")
-@cross_origin()
-def history():
-
-    try:
-
-        security_id = request.args.get("security_id")
-        exchange = request.args.get("exchange")
-        instrument = request.args.get("instrument")
-        resolution = request.args.get("resolution", "1")
-
-        from_ts = int(request.args.get("from"))
-        to_ts = int(request.args.get("to"))
-
-        print("📚 HISTORY REQUEST")
-
-        print(
-            security_id,
-            exchange,
-            instrument,
-            resolution
-        )
-
-        ist = pytz.timezone("Asia/Kolkata")
-
-        from_dt = datetime.fromtimestamp(
-            from_ts,
-            tz=ist
-        ) - timedelta(days=5)
-
-        to_dt = datetime.fromtimestamp(
-            to_ts,
-            tz=ist
-        )
-
-        from_date = from_dt.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        to_date = to_dt.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        candles = get_intraday_ohlc(
-            security_id,
-            exchange,
-            instrument,
-            from_date,
-            to_date,
-            resolution
-        )
-
-        if not candles:
-
-            return jsonify({
-                "s": "no_data"
-            })
-
-        return jsonify({
-
-            "s": "ok",
-
-            "t":
-            [c["time"] for c in candles],
-
-            "o":
-            [c["open"] for c in candles],
-
-            "h":
-            [c["high"] for c in candles],
-
-            "l":
-            [c["low"] for c in candles],
-
-            "c":
-            [c["close"] for c in candles],
-
-            "v":
-            [c["volume"] for c in candles]
-        })
-
-    except Exception as e:
-
-        print("❌ HISTORY ERROR:", str(e))
-
-        return jsonify({
-
-            "s": "error",
-
-            "errmsg": str(e)
-        })
-
-# =========================================================
-# LIVE SOCKET
-# =========================================================
-
-current_candle = None
-
-def process_tick(price, volume):
-
-    global current_candle
-
-    ts = int(time.time())
-
-    minute = ts // 60
-
-    if current_candle is None:
-
-        current_candle = {
-
-            "minute": minute,
-
-            "open": price,
-
-            "high": price,
-
-            "low": price,
-
-            "close": price,
-
-            "volume": volume
-        }
-
-        return None
-
-    if minute == current_candle["minute"]:
-
-        current_candle["high"] = max(
-            current_candle["high"],
-            price
-        )
-
-        current_candle["low"] = min(
-            current_candle["low"],
-            price
-        )
-
-        current_candle["close"] = price
-
-        current_candle["volume"] += volume
-
-        return current_candle
-
-    finished = current_candle
-
-    current_candle = {
-
-        "minute": minute,
-
-        "open": price,
-
-        "high": price,
-
-        "low": price,
-
-        "close": price,
-
-        "volume": volume
-    }
-
-    return finished
-
-# =========================================================
-# DHAN WS
-# =========================================================
-
-def start_dhan_ws():
-
-    print("🔥 Starting Dhan WS...")
-
-    def on_message(ws, message):
-
-        try:
-
-            packet_type = message[0]
-
-            if packet_type != 2:
-                return
-
-            ltp = round(
-                struct.unpack(
-                    '<f',
-                    message[8:12]
-                )[0],
-                2
-            )
-
-            candle = process_tick(ltp, 0)
-
-            if candle:
-
-                socketio.emit(
-                    "candle",
-                    candle
-                )
-
-        except Exception as e:
-
-            print("❌ WS ERROR:", e)
-
-    def on_open(ws):
-
-        print("✅ Dhan WS Connected")
-
-        subscribe = {
-
-            "RequestCode": 15,
-
-            "InstrumentCount": 1,
-
-            "InstrumentList": [
-                {
-                    "ExchangeSegment": "IDX_I",
-                    "SecurityId": "13"
+                if (searchId !== lastSearchId) {
+                    return;
                 }
-            ]
+
+                console.log(
+                    "✅ Search Results:",
+                    data
+                );
+
+                onResultReadyCallback(data);
+
+            } catch (err) {
+
+                console.error(
+                    "❌ Search Error:",
+                    err
+                );
+
+                onResultReadyCallback([]);
+            }
+
+        }, 300);
+    },
+
+    // =====================================================
+    // RESOLVE SYMBOL
+    // =====================================================
+
+    resolveSymbol: async (
+
+        symbolName,
+        onSymbolResolvedCallback,
+        onResolveErrorCallback
+
+    ) => {
+
+        try {
+
+            console.log(
+                "📌 Resolving:",
+                symbolName
+            );
+
+            const res = await fetch(
+
+                `${BASE_URL}/resolve?symbol=${encodeURIComponent(symbolName)}`
+            );
+
+            const data = await res.json();
+
+            console.log(
+                "✅ Resolve Response:",
+                data
+            );
+
+            if (data.error) {
+
+                onResolveErrorCallback(data.error);
+
+                return;
+            }
+
+            const symbolInfo = {
+
+                ticker:
+                data.ticker,
+
+                name:
+                data.name,
+
+                description:
+                data.description,
+
+                type:
+                data.type,
+
+                session:
+                data.session,
+
+                timezone:
+                data.timezone,
+
+                exchange:
+                data.exchange,
+
+                minmov:
+                data.minmov,
+
+                pricescale:
+                data.pricescale,
+
+                has_intraday:
+                true,
+
+                has_no_volume:
+                false,
+
+                has_daily:
+                true,
+
+                has_weekly_and_monthly:
+                false,
+
+                supported_resolutions:
+                data.supported_resolutions,
+
+                volume_precision:
+                2,
+
+                data_status:
+                "streaming",
+
+                visible_plots_set:
+                "ohlcv",
+
+                format:
+                "price",
+
+                security_id:
+                data.security_id,
+
+                instrument:
+                data.instrument,
+
+                exchange_segment:
+                data.exchange_segment
+            };
+
+            console.log(
+                "✅ Symbol Info:",
+                symbolInfo
+            );
+
+            onSymbolResolvedCallback(symbolInfo);
+
+        } catch (err) {
+
+            console.error(
+                "❌ Resolve Error:",
+                err
+            );
+
+            onResolveErrorCallback(
+                "Resolve failed"
+            );
+        }
+    },
+
+    // =====================================================
+    // GET BARS
+    // =====================================================
+
+    getBars: async (
+
+        symbolInfo,
+        resolution,
+        periodParams,
+        onHistoryCallback,
+        onErrorCallback
+
+    ) => {
+
+        try {
+
+            console.log(
+                "📚 Loading History..."
+            );
+
+            const {
+                from,
+                to,
+                firstDataRequest
+            } = periodParams;
+
+            const url =
+
+                `${BASE_URL}/history` +
+
+                `?security_id=${symbolInfo.security_id}` +
+
+                `&exchange=${symbolInfo.exchange_segment}` +
+
+                `&instrument=${symbolInfo.instrument}` +
+
+                `&resolution=${resolution}` +
+
+                `&from=${from}` +
+
+                `&to=${to}`;
+
+            console.log(
+                "🌐 HISTORY URL:",
+                url
+            );
+
+            const response =
+                await fetch(url);
+
+            const data =
+                await response.json();
+
+            console.log(
+                "📦 History Response:",
+                data
+            );
+
+            if (
+                !data ||
+                data.s !== "ok" ||
+                !data.t ||
+                data.t.length === 0
+            ) {
+
+                console.log(
+                    "⚠️ No history data"
+                );
+
+                onHistoryCallback(
+                    [],
+                    {
+                        noData: true
+                    }
+                );
+
+                return;
+            }
+
+            const bars = [];
+
+            for (let i = 0; i < data.t.length; i++) {
+
+                bars.push({
+
+                    time:
+                    data.t[i] * 1000,
+
+                    open:
+                    parseFloat(data.o[i]),
+
+                    high:
+                    parseFloat(data.h[i]),
+
+                    low:
+                    parseFloat(data.l[i]),
+
+                    close:
+                    parseFloat(data.c[i]),
+
+                    volume:
+                    parseFloat(data.v[i] || 0)
+                });
+            }
+
+            console.log(
+                "✅ Bars Loaded:",
+                bars.length
+            );
+
+            onHistoryCallback(
+                bars,
+                {
+                    noData: false
+                }
+            );
+
+        } catch (err) {
+
+            console.error(
+                "❌ getBars Error:",
+                err
+            );
+
+            onErrorCallback(err);
+        }
+    },
+
+    // =====================================================
+    // SUBSCRIBE BARS
+    // =====================================================
+
+    subscribeBars: (
+
+        symbolInfo,
+        resolution,
+        onRealtimeCallback,
+        subscriberUID,
+        onResetCacheNeededCallback
+
+    ) => {
+
+        console.log(
+            "📡 subscribeBars:",
+            symbolInfo.name
+        );
+
+        currentSubscriber = {
+
+            subscriberUID,
+            resolution,
+            symbolInfo,
+            onRealtimeCallback
+        };
+
+        // =================================================
+        // REUSE SOCKET
+        // =================================================
+
+        if (
+            socket &&
+            socket.connected
+        ) {
+
+            console.log(
+                "♻️ Reusing Socket"
+            );
+
+            return;
         }
 
-        time.sleep(1)
+        // =================================================
+        // CLEAN OLD SOCKET
+        // =================================================
 
-        ws.send(json.dumps(subscribe))
+        if (socket) {
 
-    def on_error(ws, error):
+            socket.disconnect();
 
-        print("❌ WS ERROR:", error)
+            socket = null;
+        }
 
-    def on_close(ws, a, b):
+        // =================================================
+        // CONNECT SOCKET
+        // =================================================
 
-        print("❌ WS CLOSED")
+        socket = io(BASE_URL, {
 
-        time.sleep(5)
+            transports: ["websocket"],
 
-        start_ws_thread()
+            reconnection: true,
 
-    ws = websocket.WebSocketApp(
+            reconnectionAttempts: 9999,
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
+            reconnectionDelay: 2000,
 
-        on_message=on_message,
+            timeout: 20000,
 
-        on_open=on_open,
+            forceNew: false
+        });
 
-        on_error=on_error,
+        // =================================================
+        // CONNECTED
+        // =================================================
 
-        on_close=on_close
-    )
+        socket.on("connect", () => {
 
-    ws.run_forever(
-        ping_interval=20,
-        ping_timeout=10
-    )
+            console.log(
+                "✅ WebSocket Connected"
+            );
+        });
 
-# =========================================================
-# START WS THREAD
-# =========================================================
+        // =================================================
+        // DISCONNECT
+        // =================================================
 
-def start_ws_thread():
+        socket.on("disconnect", (reason) => {
 
-    threading.Thread(
-        target=start_dhan_ws,
-        daemon=True
-    ).start()
+            console.log(
+                "❌ Socket Disconnected:",
+                reason
+            );
+        });
 
-# =========================================================
-# MAIN
-# =========================================================
+        // =================================================
+        // ERROR
+        // =================================================
 
-if __name__ == "__main__":
+        socket.on("connect_error", (err) => {
 
-    start_ws_thread()
+            console.log(
+                "⚠️ WS Error:",
+                err.message
+            );
+        });
 
-    port = int(
-        os.environ.get("PORT", 5000)
-    )
+        // =================================================
+        // LIVE CANDLE
+        // =================================================
 
-    socketio.run(
-        app,
-        host="0.0.0.0",
-        port=port
-    )
+        socket.on("candle", (candle) => {
+
+            try {
+
+                if (!currentSubscriber) {
+                    return;
+                }
+
+                console.log(
+                    "📊 Live Candle:",
+                    candle
+                );
+
+                currentSubscriber
+                    .onRealtimeCallback({
+
+                        time:
+                        candle.minute * 60 * 1000,
+
+                        open:
+                        parseFloat(candle.open),
+
+                        high:
+                        parseFloat(candle.high),
+
+                        low:
+                        parseFloat(candle.low),
+
+                        close:
+                        parseFloat(candle.close),
+
+                        volume:
+                        parseFloat(candle.volume || 0)
+                    });
+
+            } catch (err) {
+
+                console.log(
+                    "❌ Candle Error:",
+                    err
+                );
+            }
+        });
+    },
+
+    // =====================================================
+    // UNSUBSCRIBE
+    // =====================================================
+
+    unsubscribeBars: (subscriberUID) => {
+
+        console.log(
+            "🛑 unsubscribeBars:",
+            subscriberUID
+        );
+
+        currentSubscriber = null;
+    }
+};
+
+// =========================================================
+// EXPORT
+// =========================================================
+
+export default Datafeed;
