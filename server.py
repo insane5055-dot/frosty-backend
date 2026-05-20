@@ -1,5 +1,5 @@
 # =========================================================
-# OPTIMIZED SERVER.PY
+# ULTRA FAST FINAL SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -20,15 +20,12 @@ from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO
-from flask_compress import Compress
 
 # =========================================================
 # FLASK APP
 # =========================================================
 
 app = Flask(__name__)
-
-Compress(app)
 
 # =========================================================
 # CORS
@@ -40,8 +37,7 @@ CORS(
         r"/*": {
             "origins": "*"
         }
-    },
-    supports_credentials=True
+    }
 )
 
 # =========================================================
@@ -53,9 +49,7 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode="gevent",
     ping_timeout=30,
-    ping_interval=25,
-    logger=False,
-    engineio_logger=False
+    ping_interval=25
 )
 
 # =========================================================
@@ -69,12 +63,6 @@ HEADERS = {
     "Content-Type": "application/json",
     "access-token": ACCESS_TOKEN
 }
-
-# =========================================================
-# REQUEST SESSION
-# =========================================================
-
-session = requests.Session()
 
 # =========================================================
 # GLOBALS
@@ -137,16 +125,28 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
+    # =====================================================
+    # CLEAN DATA
+    # =====================================================
+
     SCRIP_MASTER.dropna(
         subset=[COL_DISPLAY],
         inplace=True
     )
+
+    # =====================================================
+    # PREPROCESS
+    # =====================================================
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
+
+    # =====================================================
+    # FAST SEARCH CACHE
+    # =====================================================
 
     for _, row in SCRIP_MASTER.iterrows():
 
@@ -184,7 +184,6 @@ def load_scrip_master():
 # =========================================================
 
 @app.route("/")
-@cross_origin()
 def home():
 
     return "Backend running OK"
@@ -322,9 +321,18 @@ def resolve_symbol():
             exchange_param = ""
             symbol = symbol_raw
 
-        row = SCRIP_MASTER[
-            SCRIP_MASTER["DISPLAY_UPPER"] == symbol
-        ]
+        symbol = symbol.replace(" ", "")
+
+        df = SCRIP_MASTER.copy()
+
+        df["MATCH"] = (
+            df[COL_DISPLAY]
+            .astype(str)
+            .str.upper()
+            .str.replace(" ", "")
+        )
+
+        row = df[df["MATCH"] == symbol]
 
         if exchange_param:
 
@@ -333,8 +341,6 @@ def resolve_symbol():
             ]
 
         if row.empty:
-
-            print("❌ SYMBOL NOT FOUND:", symbol)
 
             return jsonify({
                 "error": "symbol not found"
@@ -468,7 +474,7 @@ def get_intraday_ohlc(
         "toDate": to_date
     }
 
-    r = session.post(
+    r = requests.post(
         url,
         headers=HEADERS,
         json=payload,
@@ -801,7 +807,7 @@ def start_dhan_ws():
 
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=YOUR_CLIENT_ID&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
 
         on_message=on_message,
 
@@ -833,8 +839,6 @@ def start_ws_thread():
 # =========================================================
 
 if __name__ == "__main__":
-
-    load_scrip_master()
 
     start_ws_thread()
 
