@@ -1,5 +1,6 @@
 # =========================================================
 # FULL UPDATED SERVER.PY
+# NSE + BSE + INDEX + FUTURES + OPTIONS
 # =========================================================
 
 from gevent import monkey
@@ -320,8 +321,6 @@ def search_symbols():
                 tv_type
             })
 
-        print("✅ SEARCH RESULTS:", len(results))
-
         return jsonify(results)
 
     except Exception as e:
@@ -390,8 +389,10 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
+        exchange_name = str(row[COL_EXCHANGE])
+
         # =============================================
-        # EXCHANGE SEGMENT
+        # INDEX
         # =============================================
 
         if "INDEX" in instrument:
@@ -401,6 +402,10 @@ def resolve_symbol():
             pricescale = 1
 
             tv_type = "index"
+
+        # =============================================
+        # FNO
+        # =============================================
 
         elif instrument in [
 
@@ -423,25 +428,27 @@ def resolve_symbol():
 
                 tv_type = "option"
 
+        # =============================================
+        # NSE / BSE EQUITY
+        # =============================================
+
         else:
 
-    # =============================================
-    # NSE / BSE EQUITY
-    # =============================================
+            if exchange_name == "BSE":
 
-    if str(row[COL_EXCHANGE]) == "BSE":
+                exchange_segment = "BSE_EQ"
 
-        exchange_segment = "BSE_EQ"
+            else:
 
-    else:
+                exchange_segment = "NSE_EQ"
 
-        exchange_segment = "NSE_EQ"
+            pricescale = 100
 
-    pricescale = 100
-
-    tv_type = "stock"
+            tv_type = "stock"
 
         print("✅ RESOLVED:", row[COL_DISPLAY])
+
+        print("📡 EXCHANGE SEGMENT:", exchange_segment)
 
         return jsonify({
 
@@ -512,7 +519,7 @@ def resolve_symbol():
         }), 500
 
 # =========================================================
-# GET INTRADAY OHLC
+# GET OHLC
 # =========================================================
 
 def get_intraday_ohlc(
@@ -590,6 +597,10 @@ def get_intraday_ohlc(
 
             ts = int(data["timestamp"][i])
 
+            # =============================================
+            # MILLISECOND FIX
+            # =============================================
+
             if len(str(ts)) == 13:
 
                 ts = ts // 1000
@@ -620,7 +631,7 @@ def get_intraday_ohlc(
                 )
             })
 
-        print("✅ CANDLES:", len(candles))
+        print("✅ TOTAL CANDLES:", len(candles))
 
         return candles
 
@@ -659,6 +670,21 @@ def history():
         )
 
         print("📚 HISTORY REQUEST")
+
+        print({
+
+            "security_id":
+            security_id,
+
+            "exchange":
+            exchange,
+
+            "instrument":
+            instrument,
+
+            "resolution":
+            resolution
+        })
 
         ist = pytz.timezone("Asia/Kolkata")
 
@@ -923,7 +949,7 @@ def start_dhan_ws():
     )
 
 # =========================================================
-# START THREAD
+# START WS THREAD
 # =========================================================
 
 def start_ws_thread():
