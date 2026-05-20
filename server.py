@@ -1,5 +1,5 @@
 # =========================================================
-# FINAL WORKING SERVER.PY
+# FINAL UPDATED SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -220,6 +220,10 @@ def search_symbols():
 
             instr = str(item["instrument"])
 
+            # =============================================
+            # TV TYPE
+            # =============================================
+
             if "INDEX" in instr:
 
                 tv_type = "index"
@@ -330,9 +334,9 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
-        # =================================================
+        # =============================================
         # EXCHANGE SEGMENT
-        # =================================================
+        # =============================================
 
         if "INDEX" in instrument:
 
@@ -361,7 +365,7 @@ def resolve_symbol():
             pricescale = 100
             tv_type = "stock"
 
-        return jsonify({
+        response = {
 
             "name":
             row[COL_DISPLAY],
@@ -408,6 +412,12 @@ def resolve_symbol():
             "data_status":
             "streaming",
 
+            "visible_plots_set":
+            "ohlcv",
+
+            "format":
+            "price",
+
             "security_id":
             str(row[COL_SECURITY]),
 
@@ -416,7 +426,11 @@ def resolve_symbol():
 
             "exchange_segment":
             exchange_segment
-        })
+        }
+
+        print("✅ RESOLVE RESPONSE:", response)
+
+        return jsonify(response)
 
     except Exception as e:
 
@@ -477,9 +491,11 @@ def get_intraday_ohlc(
 
     res = r.json()
 
+    print("📦 DHAN RESPONSE:", res)
+
     if "open" not in res:
 
-        print("❌ NO DATA")
+        print("❌ NO OHLC DATA")
 
         return []
 
@@ -496,20 +512,20 @@ def get_intraday_ohlc(
 
             "time": ts,
 
-            "open": res["open"][i],
+            "open": float(res["open"][i]),
 
-            "high": res["high"][i],
+            "high": float(res["high"][i]),
 
-            "low": res["low"][i],
+            "low": float(res["low"][i]),
 
-            "close": res["close"][i],
+            "close": float(res["close"][i]),
 
-            "volume": (
+            "volume": float(
                 res.get("volume", [0] * len(res["open"]))[i]
             )
         })
 
-    print("✅ CANDLES:", len(data))
+    print("✅ TOTAL CANDLES:", len(data))
 
     return data
 
@@ -532,6 +548,13 @@ def history():
         to_ts = int(request.args.get("to"))
 
         print("📚 HISTORY REQUEST")
+
+        print({
+            "security_id": security_id,
+            "exchange": exchange,
+            "instrument": instrument,
+            "resolution": resolution
+        })
 
         ist = pytz.timezone("Asia/Kolkata")
 
@@ -568,7 +591,7 @@ def history():
                 "s": "no_data"
             })
 
-        return jsonify({
+        response = {
 
             "s": "ok",
 
@@ -589,7 +612,11 @@ def history():
 
             "v":
             [c["volume"] for c in candles]
-        })
+        }
+
+        print("✅ HISTORY RESPONSE READY")
+
+        return jsonify(response)
 
     except Exception as e:
 
@@ -673,7 +700,7 @@ def process_tick(price, volume):
     return finished
 
 # =========================================================
-# DHAN WS
+# DHAN WEBSOCKET
 # =========================================================
 
 def start_dhan_ws():
@@ -763,7 +790,7 @@ def start_dhan_ws():
     )
 
 # =========================================================
-# START THREAD
+# START WS THREAD
 # =========================================================
 
 def start_ws_thread():
