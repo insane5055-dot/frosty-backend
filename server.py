@@ -1,7 +1,7 @@
 # =========================================================
 # FROSTY TRADER
-# FULL UPDATED SERVER.PY
-# LIVE DOM + SOCKET.IO + CORS FIX + RENDER FIX
+# FULL FINAL UPDATED SERVER.PY
+# LIVE DOM + TRADINGVIEW + SOCKET.IO + RENDER
 # =========================================================
 
 import eventlet
@@ -33,8 +33,10 @@ from flask_socketio import SocketIO
 
 app = Flask(__name__)
 
+app.config["SECRET_KEY"] = "frosty-secret"
+
 # =========================================================
-# CORS FIX
+# CORS
 # =========================================================
 
 CORS(
@@ -129,7 +131,7 @@ def load_scrip_master():
     if SCRIP_MASTER is not None:
         return
 
-    print("🔥 LOADING SCRIP MASTER")
+    print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
 
@@ -208,7 +210,7 @@ def load_scrip_master():
             row[COL_INSTRUMENT]
         })
 
-    print("✅ SCRIP MASTER LOADED")
+    print("✅ Scrip Master Loaded")
 
 # =========================================================
 # HOME
@@ -528,6 +530,8 @@ def history():
 
     except Exception as e:
 
+        print("❌ HISTORY ERROR:", e)
+
         return jsonify({
 
             "s": "error",
@@ -592,7 +596,7 @@ def start_dhan_ws():
         try:
 
             # =============================================
-            # LTP
+            # LIVE PRICE
             # =============================================
 
             if len(message) >= 12:
@@ -622,8 +626,9 @@ def start_dhan_ws():
                             }
                         )
 
-                except:
-                    pass
+                except Exception as e:
+
+                    print("❌ LTP ERROR:", e)
 
             # =============================================
             # DOM
@@ -694,8 +699,9 @@ def start_dhan_ws():
                             "orders": i + 1
                         })
 
-                    except:
-                        pass
+                    except Exception as e:
+
+                        print("❌ DOM PARSE ERROR:", e)
 
                 live_dom = {
 
