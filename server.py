@@ -1,14 +1,5 @@
 # =========================================================
-# FULLY UPDATED SERVER.PY
-# FIXED:
-# ✅ NO DATA ISSUE
-# ✅ TV HISTORY FORMAT
-# ✅ LIVE SOCKET
-# ✅ NSE INDEX SUPPORT
-# ✅ SEARCH
-# ✅ RESOLVE
-# ✅ REALTIME CANDLES
-# ✅ SOCKET.IO
+# FULL UPDATED SERVER.PY
 # =========================================================
 
 from gevent import monkey
@@ -35,7 +26,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 
 # =========================================================
-# FLASK APP
+# FLASK
 # =========================================================
 
 app = Flask(__name__)
@@ -99,7 +90,6 @@ COL_INSTRUMENT = None
 def load_scrip_master():
 
     global SCRIP_MASTER
-
     global SEARCH_CACHE
 
     global COL_DISPLAY
@@ -173,6 +163,7 @@ def load_scrip_master():
             "BSE",
             "NSE_FNO",
             "IDX_I"
+
         ]:
             continue
 
@@ -188,7 +179,10 @@ def load_scrip_master():
             exchange,
 
             "instrument":
-            row[COL_INSTRUMENT]
+            row[COL_INSTRUMENT],
+
+            "is_index":
+            "INDEX" in str(row[COL_INSTRUMENT])
         })
 
     print("✅ SCRIP MASTER LOADED")
@@ -221,67 +215,112 @@ def search_symbols():
         if not q:
             return jsonify([])
 
-        results = []
+        exact = []
+        starts = []
+        contains = []
 
         for item in SEARCH_CACHE:
 
-            if q in item["display_upper"]:
+            name = item["display_upper"]
 
-                instr = str(item["instrument"])
+            # =============================================
+            # EXACT
+            # =============================================
 
-                # =============================================
-                # TV TYPE
-                # =============================================
+            if name == q:
 
-                if "INDEX" in instr:
+                exact.append(item)
 
-                    tv_type = "index"
+            # =============================================
+            # STARTS WITH
+            # =============================================
 
-                elif instr in [
+            elif name.startswith(q):
 
-                    "FUTIDX",
-                    "FUTSTK"
+                starts.append(item)
 
-                ]:
+            # =============================================
+            # CONTAINS
+            # =============================================
 
-                    tv_type = "futures"
+            elif q in name:
 
-                elif instr in [
+                contains.append(item)
 
-                    "OPTIDX",
-                    "OPTSTK"
+        # =============================================
+        # PRIORITY SORT
+        # =============================================
 
-                ]:
+        final = sorted(
 
-                    tv_type = "option"
+            exact + starts + contains,
 
-                else:
+            key=lambda x: (
 
-                    tv_type = "stock"
+                not x.get("is_index", False),
 
-                results.append({
+                len(x["symbol"])
+            )
+        )[:30]
 
-                    "symbol":
-                    item["symbol"],
+        results = []
 
-                    "ticker":
-                    f"{item['exchange']}:{item['symbol']}",
+        for item in final:
 
-                    "full_name":
-                    f"{item['exchange']}:{item['symbol']}",
+            instr = str(item["instrument"])
 
-                    "description":
-                    item["symbol"],
+            # =============================================
+            # TV TYPE
+            # =============================================
 
-                    "exchange":
-                    item["exchange"],
+            if "INDEX" in instr:
 
-                    "type":
-                    tv_type
-                })
+                tv_type = "index"
 
-                if len(results) >= 20:
-                    break
+            elif instr in [
+
+                "FUTIDX",
+                "FUTSTK"
+
+            ]:
+
+                tv_type = "futures"
+
+            elif instr in [
+
+                "OPTIDX",
+                "OPTSTK"
+
+            ]:
+
+                tv_type = "option"
+
+            else:
+
+                tv_type = "stock"
+
+            results.append({
+
+                "symbol":
+                item["symbol"],
+
+                "ticker":
+                f"{item['exchange']}:{item['symbol']}",
+
+                "full_name":
+                f"{item['exchange']}:{item['symbol']}",
+
+                "description":
+                item["symbol"],
+
+                "exchange":
+                item["exchange"],
+
+                "type":
+                tv_type
+            })
+
+        print("✅ SEARCH RESULTS:", len(results))
 
         return jsonify(results)
 
@@ -292,7 +331,7 @@ def search_symbols():
         return jsonify([])
 
 # =========================================================
-# RESOLVE SYMBOL
+# RESOLVE
 # =========================================================
 
 @app.route("/resolve")
@@ -351,9 +390,9 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
-        # =================================================
+        # =============================================
         # EXCHANGE SEGMENT
-        # =================================================
+        # =============================================
 
         if "INDEX" in instrument:
 
@@ -529,12 +568,9 @@ def get_intraday_ohlc(
 
         data = response.json()
 
-        print("📦 RESPONSE KEYS:")
-        print(data.keys())
-
         if "open" not in data:
 
-            print("❌ NO DATA FROM DHAN")
+            print("❌ NO DATA")
 
             return []
 
@@ -543,10 +579,6 @@ def get_intraday_ohlc(
         for i in range(len(data["open"])):
 
             ts = int(data["timestamp"][i])
-
-            # =============================================
-            # MILLISECOND FIX
-            # =============================================
 
             if len(str(ts)) == 13:
 
@@ -578,7 +610,7 @@ def get_intraday_ohlc(
                 )
             })
 
-        print("✅ TOTAL CANDLES:", len(candles))
+        print("✅ CANDLES:", len(candles))
 
         return candles
 
@@ -617,21 +649,6 @@ def history():
         )
 
         print("📚 HISTORY REQUEST")
-
-        print({
-
-            "security_id":
-            security_id,
-
-            "exchange":
-            exchange,
-
-            "instrument":
-            instrument,
-
-            "resolution":
-            resolution
-        })
 
         ist = pytz.timezone("Asia/Kolkata")
 
@@ -714,7 +731,7 @@ def history():
         })
 
 # =========================================================
-# LIVE CANDLE BUILDER
+# LIVE CANDLE
 # =========================================================
 
 current_candle = None
@@ -726,10 +743,6 @@ def process_tick(price, volume=0):
     ts = int(time.time())
 
     minute = ts // 60
-
-    # =====================================================
-    # FIRST CANDLE
-    # =====================================================
 
     if current_candle is None:
 
@@ -756,10 +769,6 @@ def process_tick(price, volume=0):
 
         return current_candle
 
-    # =====================================================
-    # SAME MINUTE
-    # =====================================================
-
     if minute == current_candle["minute"]:
 
         current_candle["high"] = max(
@@ -779,10 +788,6 @@ def process_tick(price, volume=0):
         current_candle["volume"] += volume
 
         return current_candle
-
-    # =====================================================
-    # NEW MINUTE
-    # =====================================================
 
     current_candle = {
 
@@ -843,11 +848,11 @@ def start_dhan_ws():
 
         except Exception as e:
 
-            print("❌ WS MESSAGE ERROR:", e)
+            print("❌ WS ERROR:", e)
 
     def on_open(ws):
 
-        print("✅ DHAN WS CONNECTED")
+        print("✅ WS CONNECTED")
 
         subscribe = {
 
@@ -873,7 +878,7 @@ def start_dhan_ws():
 
         ws.send(json.dumps(subscribe))
 
-        print("📡 SUBSCRIBED TO NIFTY 50")
+        print("📡 SUBSCRIBED")
 
     def on_error(ws, error):
 
@@ -908,7 +913,7 @@ def start_dhan_ws():
     )
 
 # =========================================================
-# START WS THREAD
+# START THREAD
 # =========================================================
 
 def start_ws_thread():
@@ -927,7 +932,7 @@ def start_ws_thread():
 
 if __name__ == "__main__":
 
-    print("🚀 STARTING SERVER...")
+    print("🚀 SERVER STARTED")
 
     start_ws_thread()
 
