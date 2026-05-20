@@ -1,9 +1,10 @@
 flask
 flask-cors
 flask-socketio
-eventlet
-gunicorn
+gevent
+gevent-websocket
 websocket-client
 requests
 pandas
 pytz
+gunicorn
