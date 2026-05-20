@@ -1,9 +1,22 @@
 # =========================================================
-# FINAL FIXED SERVER.PY
+# FULLY UPDATED SERVER.PY
+# FIXED:
+# ✅ NO DATA ISSUE
+# ✅ TV HISTORY FORMAT
+# ✅ LIVE SOCKET
+# ✅ NSE INDEX SUPPORT
+# ✅ SEARCH
+# ✅ RESOLVE
+# ✅ REALTIME CANDLES
+# ✅ SOCKET.IO
 # =========================================================
 
 from gevent import monkey
 monkey.patch_all()
+
+# =========================================================
+# IMPORTS
+# =========================================================
 
 import os
 import json
@@ -18,11 +31,11 @@ import websocket
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
-from flask_cors import CORS, cross_origin
+from flask_cors import CORS
 from flask_socketio import SocketIO
 
 # =========================================================
-# FLASK
+# FLASK APP
 # =========================================================
 
 app = Flask(__name__)
@@ -37,10 +50,15 @@ CORS(
 )
 
 socketio = SocketIO(
+
     app,
+
     cors_allowed_origins="*",
+
     async_mode="gevent",
+
     ping_timeout=30,
+
     ping_interval=25
 )
 
@@ -53,8 +71,11 @@ ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5
 CLIENT_ID = "1101310334"
 
 HEADERS = {
+
     "Accept": "application/json",
+
     "Content-Type": "application/json",
+
     "access-token": ACCESS_TOKEN
 }
 
@@ -78,6 +99,7 @@ COL_INSTRUMENT = None
 def load_scrip_master():
 
     global SCRIP_MASTER
+
     global SEARCH_CACHE
 
     global COL_DISPLAY
@@ -88,43 +110,54 @@ def load_scrip_master():
     if SCRIP_MASTER is not None:
         return
 
-    print("🔥 Loading Scrip Master...")
+    print("🔥 LOADING SCRIP MASTER...")
 
     SCRIP_MASTER = pd.read_csv(
+
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
+
         low_memory=False
     )
 
     SCRIP_MASTER.columns = (
-        SCRIP_MASTER.columns.str.upper()
+
+        SCRIP_MASTER.columns
+        .str.upper()
     )
 
     COL_DISPLAY = next(
+
         c for c in SCRIP_MASTER.columns
         if "DISPLAY" in c
     )
 
     COL_SECURITY = next(
+
         c for c in SCRIP_MASTER.columns
         if "SECURITY" in c
     )
 
     COL_EXCHANGE = next(
+
         c for c in SCRIP_MASTER.columns
         if "EXCH" in c
     )
 
     COL_INSTRUMENT = next(
+
         c for c in SCRIP_MASTER.columns
         if "INSTRUMENT" in c
     )
 
     SCRIP_MASTER.dropna(
+
         subset=[COL_DISPLAY],
+
         inplace=True
     )
 
     SCRIP_MASTER["DISPLAY_UPPER"] = (
+
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
@@ -135,6 +168,7 @@ def load_scrip_master():
         exchange = str(row[COL_EXCHANGE])
 
         if exchange not in [
+
             "NSE",
             "BSE",
             "NSE_FNO",
@@ -157,7 +191,7 @@ def load_scrip_master():
             row[COL_INSTRUMENT]
         })
 
-    print("✅ Scrip Master Loaded")
+    print("✅ SCRIP MASTER LOADED")
 
 # =========================================================
 # HOME
@@ -166,14 +200,13 @@ def load_scrip_master():
 @app.route("/")
 def home():
 
-    return "Backend running OK"
+    return "Backend Running OK"
 
 # =========================================================
 # SEARCH
 # =========================================================
 
 @app.route("/search")
-@cross_origin()
 def search_symbols():
 
     try:
@@ -188,84 +221,67 @@ def search_symbols():
         if not q:
             return jsonify([])
 
-        exact = []
-        starts = []
-        contains = []
+        results = []
 
         for item in SEARCH_CACHE:
 
-            name = item["display_upper"]
+            if q in item["display_upper"]:
 
-            if name == q:
+                instr = str(item["instrument"])
 
-                exact.append(item)
+                # =============================================
+                # TV TYPE
+                # =============================================
 
-            elif name.startswith(q):
+                if "INDEX" in instr:
 
-                starts.append(item)
+                    tv_type = "index"
 
-            elif q in name:
+                elif instr in [
 
-                contains.append(item)
+                    "FUTIDX",
+                    "FUTSTK"
 
-        final = (
-            exact[:5] +
-            starts[:10] +
-            contains[:10]
-        )
+                ]:
 
-        results = []
+                    tv_type = "futures"
 
-        for item in final:
+                elif instr in [
 
-            instr = str(item["instrument"])
+                    "OPTIDX",
+                    "OPTSTK"
 
-            # =============================================
-            # TV TYPE
-            # =============================================
+                ]:
 
-            if "INDEX" in instr:
+                    tv_type = "option"
 
-                tv_type = "index"
+                else:
 
-            elif instr in [
-                "FUTIDX",
-                "FUTSTK"
-            ]:
+                    tv_type = "stock"
 
-                tv_type = "futures"
+                results.append({
 
-            elif instr in [
-                "OPTIDX",
-                "OPTSTK"
-            ]:
+                    "symbol":
+                    item["symbol"],
 
-                tv_type = "option"
+                    "ticker":
+                    f"{item['exchange']}:{item['symbol']}",
 
-            else:
+                    "full_name":
+                    f"{item['exchange']}:{item['symbol']}",
 
-                tv_type = "stock"
+                    "description":
+                    item["symbol"],
 
-            results.append({
+                    "exchange":
+                    item["exchange"],
 
-                "symbol":
-                item["symbol"],
+                    "type":
+                    tv_type
+                })
 
-                "ticker":
-                f"{item['exchange']}:{item['symbol']}",
-
-                "full_name":
-                f"{item['exchange']}:{item['symbol']}",
-
-                "description":
-                item["symbol"],
-
-                "exchange":
-                item["exchange"],
-
-                "type":
-                tv_type
-            })
+                if len(results) >= 20:
+                    break
 
         return jsonify(results)
 
@@ -276,11 +292,10 @@ def search_symbols():
         return jsonify([])
 
 # =========================================================
-# RESOLVE
+# RESOLVE SYMBOL
 # =========================================================
 
 @app.route("/resolve")
-@cross_origin()
 def resolve_symbol():
 
     try:
@@ -297,6 +312,7 @@ def resolve_symbol():
         if ":" in symbol_raw:
 
             exchange_param, symbol = (
+
                 symbol_raw.split(":", 1)
             )
 
@@ -310,6 +326,7 @@ def resolve_symbol():
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
+
             df[COL_DISPLAY]
             .astype(str)
             .str.upper()
@@ -334,35 +351,45 @@ def resolve_symbol():
 
         instrument = str(row[COL_INSTRUMENT])
 
-        # =============================================
+        # =================================================
         # EXCHANGE SEGMENT
-        # =============================================
+        # =================================================
 
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
+
             pricescale = 1
+
             tv_type = "index"
 
         elif instrument in [
+
             "OPTIDX",
             "FUTIDX",
             "OPTSTK",
             "FUTSTK"
+
         ]:
 
             exchange_segment = "NSE_FNO"
+
             pricescale = 100
 
             if "FUT" in instrument:
+
                 tv_type = "futures"
+
             else:
+
                 tv_type = "option"
 
         else:
 
             exchange_segment = "NSE_EQ"
+
             pricescale = 100
+
             tv_type = "stock"
 
         print("✅ RESOLVED:", row[COL_DISPLAY])
@@ -406,7 +433,7 @@ def resolve_symbol():
             True,
 
             "supported_resolutions":
-            ["1", "5", "15"],
+            ["1", "5", "15", "30", "60"],
 
             "volume_precision":
             2,
@@ -429,14 +456,18 @@ def resolve_symbol():
         print("❌ RESOLVE ERROR:", str(e))
 
         return jsonify({
-            "error": str(e)
+
+            "error":
+            str(e)
+
         }), 500
 
 # =========================================================
-# FETCH OHLC
+# GET INTRADAY OHLC
 # =========================================================
 
 def get_intraday_ohlc(
+
     security_id,
     exchange,
     instrument,
@@ -445,118 +476,177 @@ def get_intraday_ohlc(
     resolution
 ):
 
-    url = "https://api.dhan.co/v2/charts/intraday"
+    try:
 
-    payload = {
+        url = "https://api.dhan.co/v2/charts/intraday"
 
-        "securityId": str(security_id),
+        payload = {
 
-        "exchangeSegment": exchange,
+            "securityId":
+            str(security_id),
 
-        "instrument": instrument,
+            "exchangeSegment":
+            exchange,
 
-        "interval": resolution,
+            "instrument":
+            instrument,
 
-        "oi": False,
+            "interval":
+            resolution,
 
-        "fromDate": from_date,
+            "oi":
+            False,
 
-        "toDate": to_date
-    }
+            "fromDate":
+            from_date,
 
-    print("📤 DHAN PAYLOAD:", payload)
+            "toDate":
+            to_date
+        }
 
-    r = requests.post(
-        url,
-        headers=HEADERS,
-        json=payload,
-        timeout=20
-    )
+        print("📤 PAYLOAD:")
+        print(payload)
 
-    print("📥 DHAN STATUS:", r.status_code)
+        response = requests.post(
 
-    if r.status_code != 200:
+            url,
 
-        print("❌ DHAN ERROR:", r.text)
+            headers=HEADERS,
+
+            json=payload,
+
+            timeout=30
+        )
+
+        print("📥 STATUS:", response.status_code)
+
+        if response.status_code != 200:
+
+            print("❌ DHAN ERROR:")
+            print(response.text)
+
+            return []
+
+        data = response.json()
+
+        print("📦 RESPONSE KEYS:")
+        print(data.keys())
+
+        if "open" not in data:
+
+            print("❌ NO DATA FROM DHAN")
+
+            return []
+
+        candles = []
+
+        for i in range(len(data["open"])):
+
+            ts = int(data["timestamp"][i])
+
+            # =============================================
+            # MILLISECOND FIX
+            # =============================================
+
+            if len(str(ts)) == 13:
+
+                ts = ts // 1000
+
+            candles.append({
+
+                "time":
+                ts,
+
+                "open":
+                float(data["open"][i]),
+
+                "high":
+                float(data["high"][i]),
+
+                "low":
+                float(data["low"][i]),
+
+                "close":
+                float(data["close"][i]),
+
+                "volume":
+                float(
+                    data.get(
+                        "volume",
+                        [0] * len(data["open"])
+                    )[i]
+                )
+            })
+
+        print("✅ TOTAL CANDLES:", len(candles))
+
+        return candles
+
+    except Exception as e:
+
+        print("❌ OHLC ERROR:", str(e))
 
         return []
-
-    res = r.json()
-
-    print("📦 DHAN RESPONSE:", list(res.keys()))
-
-    if "open" not in res:
-
-        print("❌ NO OHLC DATA")
-
-        return []
-
-    data = []
-
-    for i in range(len(res["open"])):
-
-        ts = int(res["timestamp"][i])
-
-        if len(str(ts)) == 13:
-            ts //= 1000
-
-        data.append({
-
-            "time": ts,
-
-            "open": res["open"][i],
-
-            "high": res["high"][i],
-
-            "low": res["low"][i],
-
-            "close": res["close"][i],
-
-            "volume": (
-                res.get("volume", [0] * len(res["open"]))[i]
-            )
-        })
-
-    print("✅ CANDLES:", len(data))
-
-    return data
 
 # =========================================================
 # HISTORY
 # =========================================================
 
 @app.route("/history")
-@cross_origin()
 def history():
 
     try:
 
         security_id = request.args.get("security_id")
-        exchange = request.args.get("exchange")
-        instrument = request.args.get("instrument")
-        resolution = request.args.get("resolution", "1")
 
-        from_ts = int(request.args.get("from"))
-        to_ts = int(request.args.get("to"))
+        exchange = request.args.get("exchange")
+
+        instrument = request.args.get("instrument")
+
+        resolution = request.args.get(
+            "resolution",
+            "1"
+        )
+
+        from_ts = int(
+            request.args.get("from")
+        )
+
+        to_ts = int(
+            request.args.get("to")
+        )
 
         print("📚 HISTORY REQUEST")
 
-        print(
+        print({
+
+            "security_id":
             security_id,
+
+            "exchange":
             exchange,
+
+            "instrument":
             instrument,
+
+            "resolution":
             resolution
-        )
+        })
 
         ist = pytz.timezone("Asia/Kolkata")
 
         from_dt = datetime.fromtimestamp(
+
             from_ts,
+
             tz=ist
+
         ) - timedelta(days=5)
 
         to_dt = datetime.fromtimestamp(
+
             to_ts,
+
             tz=ist
         )
 
@@ -569,6 +659,7 @@ def history():
         )
 
         candles = get_intraday_ohlc(
+
             security_id,
             exchange,
             instrument,
@@ -580,12 +671,15 @@ def history():
         if not candles:
 
             return jsonify({
-                "s": "no_data"
+
+                "s":
+                "no_data"
             })
 
         return jsonify({
 
-            "s": "ok",
+            "s":
+            "ok",
 
             "t":
             [c["time"] for c in candles],
@@ -612,18 +706,20 @@ def history():
 
         return jsonify({
 
-            "s": "error",
+            "s":
+            "error",
 
-            "errmsg": str(e)
+            "errmsg":
+            str(e)
         })
 
 # =========================================================
-# LIVE SOCKET
+# LIVE CANDLE BUILDER
 # =========================================================
 
 current_candle = None
 
-def process_tick(price, volume):
+def process_tick(price, volume=0):
 
     global current_candle
 
@@ -631,33 +727,49 @@ def process_tick(price, volume):
 
     minute = ts // 60
 
+    # =====================================================
+    # FIRST CANDLE
+    # =====================================================
+
     if current_candle is None:
 
         current_candle = {
 
-            "minute": minute,
+            "minute":
+            minute,
 
-            "open": price,
+            "open":
+            price,
 
-            "high": price,
+            "high":
+            price,
 
-            "low": price,
+            "low":
+            price,
 
-            "close": price,
+            "close":
+            price,
 
-            "volume": volume
+            "volume":
+            volume
         }
 
-        return None
+        return current_candle
+
+    # =====================================================
+    # SAME MINUTE
+    # =====================================================
 
     if minute == current_candle["minute"]:
 
         current_candle["high"] = max(
+
             current_candle["high"],
             price
         )
 
         current_candle["low"] = min(
+
             current_candle["low"],
             price
         )
@@ -668,32 +780,40 @@ def process_tick(price, volume):
 
         return current_candle
 
-    finished = current_candle
+    # =====================================================
+    # NEW MINUTE
+    # =====================================================
 
     current_candle = {
 
-        "minute": minute,
+        "minute":
+        minute,
 
-        "open": price,
+        "open":
+        price,
 
-        "high": price,
+        "high":
+        price,
 
-        "low": price,
+        "low":
+        price,
 
-        "close": price,
+        "close":
+        price,
 
-        "volume": volume
+        "volume":
+        volume
     }
 
-    return finished
+    return current_candle
 
 # =========================================================
-# DHAN WS
+# DHAN WEBSOCKET
 # =========================================================
 
 def start_dhan_ws():
 
-    print("🔥 Starting Dhan WS...")
+    print("🔥 STARTING DHAN WS...")
 
     def on_message(ws, message):
 
@@ -705,40 +825,46 @@ def start_dhan_ws():
                 return
 
             ltp = round(
+
                 struct.unpack(
                     '<f',
                     message[8:12]
                 )[0],
+
                 2
             )
 
-            candle = process_tick(ltp, 0)
+            candle = process_tick(ltp)
 
-            if candle:
-
-                socketio.emit(
-                    "candle",
-                    candle
-                )
+            socketio.emit(
+                "candle",
+                candle
+            )
 
         except Exception as e:
 
-            print("❌ WS ERROR:", e)
+            print("❌ WS MESSAGE ERROR:", e)
 
     def on_open(ws):
 
-        print("✅ Dhan WS Connected")
+        print("✅ DHAN WS CONNECTED")
 
         subscribe = {
 
-            "RequestCode": 15,
+            "RequestCode":
+            15,
 
-            "InstrumentCount": 1,
+            "InstrumentCount":
+            1,
 
             "InstrumentList": [
+
                 {
-                    "ExchangeSegment": "IDX_I",
-                    "SecurityId": "13"
+                    "ExchangeSegment":
+                    "IDX_I",
+
+                    "SecurityId":
+                    "13"
                 }
             ]
         }
@@ -746,6 +872,8 @@ def start_dhan_ws():
         time.sleep(1)
 
         ws.send(json.dumps(subscribe))
+
+        print("📡 SUBSCRIBED TO NIFTY 50")
 
     def on_error(ws, error):
 
@@ -763,9 +891,9 @@ def start_dhan_ws():
 
         f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
 
-        on_message=on_message,
-
         on_open=on_open,
+
+        on_message=on_message,
 
         on_error=on_error,
 
@@ -773,7 +901,9 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
+
         ping_interval=20,
+
         ping_timeout=10
     )
 
@@ -784,8 +914,11 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
+
         target=start_dhan_ws,
+
         daemon=True
+
     ).start()
 
 # =========================================================
@@ -794,6 +927,8 @@ def start_ws_thread():
 
 if __name__ == "__main__":
 
+    print("🚀 STARTING SERVER...")
+
     start_ws_thread()
 
     port = int(
@@ -801,7 +936,12 @@ if __name__ == "__main__":
     )
 
     socketio.run(
+
         app,
+
         host="0.0.0.0",
-        port=port
+
+        port=port,
+
+        debug=True
     )
