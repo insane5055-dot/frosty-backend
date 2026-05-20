@@ -1,31 +1,21 @@
 # =========================================================
-# FROSTY TRADER
-# ULTRA FULL UPDATED SERVER.PY
-# LIVE DOM + TRADINGVIEW + SOCKET.IO + DHAN + HISTORY
+# ULTRA FAST FINAL SERVER.PY
 # =========================================================
+
+from gevent import monkey
+monkey.patch_all()
 
 import os
 import json
 import time
 import struct
 import threading
-from datetime import datetime, timedelta
-
-# =========================================================
-# EVENTLET
-# =========================================================
-
-import eventlet
-eventlet.monkey_patch()
-
-# =========================================================
-# IMPORTS
-# =========================================================
-
-import pytz
 import requests
 import pandas as pd
+import pytz
 import websocket
+
+from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
@@ -37,23 +27,17 @@ from flask_socketio import SocketIO
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = "frosty-secret"
-
 # =========================================================
 # CORS
 # =========================================================
 
 CORS(
-
     app,
-
     resources={
         r"/*": {
             "origins": "*"
         }
-    },
-
-    supports_credentials=True
+    }
 )
 
 # =========================================================
@@ -61,19 +45,10 @@ CORS(
 # =========================================================
 
 socketio = SocketIO(
-
     app,
-
     cors_allowed_origins="*",
-
-    async_mode="eventlet",
-
-    logger=True,
-
-    engineio_logger=True,
-
+    async_mode="gevent",
     ping_timeout=30,
-
     ping_interval=25
 )
 
@@ -83,31 +58,15 @@ socketio = SocketIO(
 
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc5Mjg4ODc3LCJpYXQiOjE3NzkyMDI0NzcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAxMzEwMzM0In0.vPSfT9wLzkLqvBRukg3D9oH3PPeb5qDaKgGHB2b5BLxZl7P1d2-nPwbpvu7lBTzQBSNsmdKYZ5czDXB-EqrrHg"
 
-CLIENT_ID = "1101310334"
-
 HEADERS = {
-
     "Accept": "application/json",
-
     "Content-Type": "application/json",
-
     "access-token": ACCESS_TOKEN
 }
 
 # =========================================================
 # GLOBALS
 # =========================================================
-
-live_price = 0
-
-live_dom = {
-
-    "bids": [],
-
-    "asks": []
-}
-
-current_candle = None
 
 SCRIP_MASTER = None
 
@@ -138,16 +97,12 @@ def load_scrip_master():
     print("🔥 Loading Scrip Master...")
 
     SCRIP_MASTER = pd.read_csv(
-
         "https://images.dhan.co/api-data/api-scrip-master-detailed.csv",
-
         low_memory=False
     )
 
     SCRIP_MASTER.columns = (
-
-        SCRIP_MASTER.columns
-        .str.upper()
+        SCRIP_MASTER.columns.str.upper()
     )
 
     COL_DISPLAY = next(
@@ -170,28 +125,34 @@ def load_scrip_master():
         if "INSTRUMENT" in c
     )
 
+    # =====================================================
+    # CLEAN DATA
+    # =====================================================
+
     SCRIP_MASTER.dropna(
-
         subset=[COL_DISPLAY],
-
         inplace=True
     )
 
-    SCRIP_MASTER["DISPLAY_UPPER"] = (
+    # =====================================================
+    # PREPROCESS
+    # =====================================================
 
+    SCRIP_MASTER["DISPLAY_UPPER"] = (
         SCRIP_MASTER[COL_DISPLAY]
         .astype(str)
         .str.upper()
     )
 
+    # =====================================================
+    # FAST SEARCH CACHE
+    # =====================================================
+
     for _, row in SCRIP_MASTER.iterrows():
 
-        exchange = str(
-            row[COL_EXCHANGE]
-        )
+        exchange = str(row[COL_EXCHANGE])
 
         if exchange not in [
-
             "NSE",
             "BSE",
             "NSE_FNO",
@@ -214,6 +175,8 @@ def load_scrip_master():
             row[COL_INSTRUMENT]
         })
 
+    print("⚡ Search cache ready:", len(SEARCH_CACHE))
+
     print("✅ Scrip Master Loaded")
 
 # =========================================================
@@ -221,22 +184,16 @@ def load_scrip_master():
 # =========================================================
 
 @app.route("/")
-@cross_origin(origins="*")
 def home():
 
-    return jsonify({
-
-        "status": "running",
-
-        "websocket": "active"
-    })
+    return "Backend running OK"
 
 # =========================================================
 # SEARCH
 # =========================================================
 
 @app.route("/search")
-@cross_origin(origins="*")
+@cross_origin()
 def search_symbols():
 
     try:
@@ -272,11 +229,8 @@ def search_symbols():
                 contains.append(item)
 
         final = (
-
             exact[:5] +
-
             starts[:10] +
-
             contains[:10]
         )
 
@@ -284,16 +238,13 @@ def search_symbols():
 
         for item in final:
 
-            instr = str(
-                item["instrument"]
-            )
+            instr = str(item["instrument"])
 
             if "INDEX" in instr:
 
                 tv_type = "index"
 
             elif instr in [
-
                 "FUTIDX",
                 "FUTSTK"
             ]:
@@ -301,7 +252,6 @@ def search_symbols():
                 tv_type = "futures"
 
             elif instr in [
-
                 "OPTIDX",
                 "OPTSTK"
             ]:
@@ -346,7 +296,7 @@ def search_symbols():
 # =========================================================
 
 @app.route("/resolve")
-@cross_origin(origins="*")
+@cross_origin()
 def resolve_symbol():
 
     try:
@@ -354,10 +304,8 @@ def resolve_symbol():
         load_scrip_master()
 
         symbol_raw = request.args.get(
-
             "symbol",
-
-            "NSE:NIFTY 50"
+            ""
         ).upper().strip()
 
         print("📌 RESOLVE:", symbol_raw)
@@ -365,7 +313,6 @@ def resolve_symbol():
         if ":" in symbol_raw:
 
             exchange_param, symbol = (
-
                 symbol_raw.split(":", 1)
             )
 
@@ -374,55 +321,45 @@ def resolve_symbol():
             exchange_param = ""
             symbol = symbol_raw
 
-        symbol = symbol.replace(
-            " ",
-            ""
-        )
+        symbol = symbol.replace(" ", "")
 
         df = SCRIP_MASTER.copy()
 
         df["MATCH"] = (
-
             df[COL_DISPLAY]
             .astype(str)
             .str.upper()
             .str.replace(" ", "")
         )
 
-        row = df[
-            df["MATCH"] == symbol
-        ]
+        row = df[df["MATCH"] == symbol]
 
         if exchange_param:
 
             row = row[
-                row[COL_EXCHANGE]
-                == exchange_param
+                row[COL_EXCHANGE] == exchange_param
             ]
 
         if row.empty:
 
             return jsonify({
-
-                "error":
-                "symbol not found"
-
+                "error": "symbol not found"
             }), 404
 
         row = row.iloc[0]
 
-        instrument = str(
-            row[COL_INSTRUMENT]
-        )
+        instrument = str(row[COL_INSTRUMENT])
+
+        # =================================================
+        # EXCHANGE SEGMENT
+        # =================================================
 
         if "INDEX" in instrument:
 
             exchange_segment = "IDX_I"
-
             pricescale = 1
 
         elif instrument in [
-
             "OPTIDX",
             "FUTIDX",
             "OPTSTK",
@@ -430,12 +367,17 @@ def resolve_symbol():
         ]:
 
             exchange_segment = "NSE_FNO"
-
             pricescale = 100
 
         else:
 
-            exchange_segment = "NSE_EQ"
+            if row[COL_EXCHANGE] == "BSE":
+
+                exchange_segment = "BSE_EQ"
+
+            else:
+
+                exchange_segment = "NSE_EQ"
 
             pricescale = 100
 
@@ -477,12 +419,8 @@ def resolve_symbol():
             "has_weekly_and_monthly":
             True,
 
-            "supported_resolutions": [
-
-                "1",
-                "5",
-                "15"
-            ],
+            "supported_resolutions":
+            ["1", "5", "15"],
 
             "data_status":
             "streaming",
@@ -499,45 +437,224 @@ def resolve_symbol():
 
     except Exception as e:
 
-        print("❌ RESOLVE ERROR:", e)
+        print("❌ RESOLVE ERROR:", str(e))
 
         return jsonify({
-
-            "error":
-            str(e)
-
+            "error": str(e)
         }), 500
+
+# =========================================================
+# FETCH INTRADAY
+# =========================================================
+
+def get_intraday_ohlc(
+    security_id,
+    exchange,
+    instrument,
+    from_date,
+    to_date
+):
+
+    url = "https://api.dhan.co/v2/charts/intraday"
+
+    payload = {
+
+        "securityId": str(security_id),
+
+        "exchangeSegment": exchange,
+
+        "instrument": instrument,
+
+        "interval": "1",
+
+        "oi": False,
+
+        "fromDate": from_date,
+
+        "toDate": to_date
+    }
+
+    r = requests.post(
+        url,
+        headers=HEADERS,
+        json=payload,
+        timeout=20
+    )
+
+    if r.status_code != 200:
+
+        print("❌ DHAN ERROR:", r.text)
+
+        return []
+
+    res = r.json()
+
+    if "open" not in res:
+        return []
+
+    data = []
+
+    for i in range(len(res["open"])):
+
+        ts = int(res["timestamp"][i])
+
+        if len(str(ts)) == 13:
+            ts //= 1000
+
+        data.append({
+
+            "time": ts,
+
+            "open": res["open"][i],
+
+            "high": res["high"][i],
+
+            "low": res["low"][i],
+
+            "close": res["close"][i],
+
+            "volume": res.get("volume", [0])[i]
+        })
+
+    return sorted(
+        data,
+        key=lambda x: x["time"]
+    )
+
+# =========================================================
+# AGGREGATE
+# =========================================================
+
+def aggregate_candles(candles, step):
+
+    out = []
+
+    for i in range(0, len(candles), step):
+
+        chunk = candles[i:i + step]
+
+        if len(chunk) < step:
+            continue
+
+        out.append({
+
+            "time": chunk[0]["time"],
+
+            "open": chunk[0]["open"],
+
+            "high": max(
+                c["high"] for c in chunk
+            ),
+
+            "low": min(
+                c["low"] for c in chunk
+            ),
+
+            "close": chunk[-1]["close"],
+
+            "volume": sum(
+                c["volume"] for c in chunk
+            )
+        })
+
+    return out
 
 # =========================================================
 # HISTORY
 # =========================================================
 
 @app.route("/history")
-@cross_origin(origins="*")
+@cross_origin()
 def history():
 
     try:
+
+        security_id = request.args.get("security_id")
+        exchange = request.args.get("exchange")
+        instrument = request.args.get("instrument")
+        resolution = request.args.get("resolution", "1")
+
+        from_ts = int(request.args.get("from"))
+        to_ts = int(request.args.get("to"))
+
+        ist = pytz.timezone("Asia/Kolkata")
+
+        from_dt = datetime.fromtimestamp(
+            from_ts,
+            tz=ist
+        ) - timedelta(days=5)
+
+        to_dt = datetime.fromtimestamp(
+            to_ts,
+            tz=ist
+        )
+
+        from_date = from_dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        to_date = to_dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        candles_1m = get_intraday_ohlc(
+            security_id,
+            exchange,
+            instrument,
+            from_date,
+            to_date
+        )
+
+        if not candles_1m:
+
+            return jsonify({
+                "s": "no_data"
+            })
+
+        if resolution == "5":
+
+            candles = aggregate_candles(
+                candles_1m,
+                5
+            )
+
+        elif resolution == "15":
+
+            candles = aggregate_candles(
+                candles_1m,
+                15
+            )
+
+        else:
+
+            candles = candles_1m
 
         return jsonify({
 
             "s": "ok",
 
-            "t": [],
+            "t":
+            [c["time"] for c in candles],
 
-            "o": [],
+            "o":
+            [c["open"] for c in candles],
 
-            "h": [],
+            "h":
+            [c["high"] for c in candles],
 
-            "l": [],
+            "l":
+            [c["low"] for c in candles],
 
-            "c": [],
+            "c":
+            [c["close"] for c in candles],
 
-            "v": []
+            "v":
+            [c["volume"] for c in candles]
         })
 
     except Exception as e:
 
-        print("❌ HISTORY ERROR:", e)
+        print("❌ HISTORY ERROR:", str(e))
 
         return jsonify({
 
@@ -547,10 +664,12 @@ def history():
         })
 
 # =========================================================
-# PROCESS TICK
+# LIVE WEBSOCKET
 # =========================================================
 
-def process_tick(price):
+current_candle = None
+
+def process_tick(price, volume):
 
     global current_candle
 
@@ -570,7 +689,9 @@ def process_tick(price):
 
             "low": price,
 
-            "close": price
+            "close": price,
+
+            "volume": volume
         }
 
         return None
@@ -578,18 +699,18 @@ def process_tick(price):
     if minute == current_candle["minute"]:
 
         current_candle["high"] = max(
-
             current_candle["high"],
             price
         )
 
         current_candle["low"] = min(
-
             current_candle["low"],
             price
         )
 
         current_candle["close"] = price
+
+        current_candle["volume"] += volume
 
         return current_candle
 
@@ -605,44 +726,12 @@ def process_tick(price):
 
         "low": price,
 
-        "close": price
+        "close": price,
+
+        "volume": volume
     }
 
     return finished
-
-# =========================================================
-# SOCKET CONNECT
-# =========================================================
-
-@socketio.on("connect")
-def handle_connect():
-
-    print("🟢 CLIENT CONNECTED")
-
-    socketio.emit(
-
-        "ltp",
-
-        {
-            "price": live_price
-        }
-    )
-
-    socketio.emit(
-
-        "dom",
-
-        live_dom
-    )
-
-# =========================================================
-# SOCKET DISCONNECT
-# =========================================================
-
-@socketio.on("disconnect")
-def handle_disconnect():
-
-    print("🔴 CLIENT DISCONNECTED")
 
 # =========================================================
 # DHAN WS
@@ -650,177 +739,49 @@ def handle_disconnect():
 
 def start_dhan_ws():
 
-    global live_price
-    global live_dom
-
-    print("🔥 STARTING DHAN WS")
-
-    # =====================================================
-    # MESSAGE
-    # =====================================================
+    print("🔥 Starting Dhan WS...")
 
     def on_message(ws, message):
 
-        global live_price
-        global live_dom
-
         try:
 
-            # =============================================
-            # LIVE PRICE
-            # =============================================
+            packet_type = message[0]
 
-            if len(message) >= 12:
+            if packet_type != 2:
+                return
 
-                try:
+            ltp = round(
+                struct.unpack(
+                    '<f',
+                    message[8:12]
+                )[0],
+                2
+            )
 
-                    ltp = round(
+            candle = process_tick(ltp, 0)
 
-                        struct.unpack(
-                            "<f",
-                            message[8:12]
-                        )[0],
-
-                        2
-                    )
-
-                    if ltp > 0:
-
-                        live_price = ltp
-
-                        socketio.emit(
-
-                            "ltp",
-
-                            {
-                                "price": ltp
-                            }
-                        )
-
-                        candle = process_tick(
-                            ltp
-                        )
-
-                        if candle:
-
-                            socketio.emit(
-                                "candle",
-                                candle
-                            )
-
-                except Exception as e:
-
-                    print("❌ LTP ERROR:", e)
-
-            # =============================================
-            # DOM
-            # =============================================
-
-            if len(message) > 200:
-
-                bids = []
-                asks = []
-
-                base = 64
-
-                for i in range(5):
-
-                    offset = base + (i * 20)
-
-                    try:
-
-                        bid_qty = struct.unpack(
-
-                            "<I",
-
-                            message[offset:offset+4]
-
-                        )[0]
-
-                        bid_price = round(
-
-                            struct.unpack(
-                                "<f",
-                                message[offset+4:offset+8]
-                            )[0],
-
-                            2
-                        )
-
-                        ask_qty = struct.unpack(
-
-                            "<I",
-
-                            message[offset+10:offset+14]
-
-                        )[0]
-
-                        ask_price = round(
-
-                            struct.unpack(
-                                "<f",
-                                message[offset+14:offset+18]
-                            )[0],
-
-                            2
-                        )
-
-                        bids.append({
-
-                            "price": bid_price,
-
-                            "qty": bid_qty,
-
-                            "orders": i + 1
-                        })
-
-                        asks.append({
-
-                            "price": ask_price,
-
-                            "qty": ask_qty,
-
-                            "orders": i + 1
-                        })
-
-                    except Exception as e:
-
-                        print("❌ DOM PARSE ERROR:", e)
-
-                live_dom = {
-
-                    "bids": bids,
-
-                    "asks": asks
-                }
+            if candle:
 
                 socketio.emit(
-
-                    "dom",
-
-                    live_dom
+                    "candle",
+                    candle
                 )
 
         except Exception as e:
 
-            print("❌ WS ERROR:", e)
-
-    # =====================================================
-    # OPEN
-    # =====================================================
+            print("❌ WS DECODE ERROR:", e)
 
     def on_open(ws):
 
-        print("✅ DHAN WS CONNECTED")
+        print("✅ Dhan WS Connected")
 
         subscribe = {
 
-            "RequestCode": 21,
+            "RequestCode": 15,
 
             "InstrumentCount": 1,
 
             "InstrumentList": [
-
                 {
                     "ExchangeSegment": "IDX_I",
                     "SecurityId": "13"
@@ -830,23 +791,11 @@ def start_dhan_ws():
 
         time.sleep(1)
 
-        ws.send(
-            json.dumps(subscribe)
-        )
-
-        print("✅ DOM SUBSCRIBED")
-
-    # =====================================================
-    # ERROR
-    # =====================================================
+        ws.send(json.dumps(subscribe))
 
     def on_error(ws, error):
 
         print("❌ DHAN WS ERROR:", error)
-
-    # =====================================================
-    # CLOSE
-    # =====================================================
 
     def on_close(ws, a, b):
 
@@ -856,13 +805,9 @@ def start_dhan_ws():
 
         start_ws_thread()
 
-    # =====================================================
-    # CONNECT
-    # =====================================================
-
     ws = websocket.WebSocketApp(
 
-        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId={CLIENT_ID}&authType=2",
+        f"wss://api-feed.dhan.co?version=2&token={ACCESS_TOKEN}&clientId=1101310334&authType=2",
 
         on_message=on_message,
 
@@ -874,9 +819,7 @@ def start_dhan_ws():
     )
 
     ws.run_forever(
-
         ping_interval=20,
-
         ping_timeout=10
     )
 
@@ -887,18 +830,9 @@ def start_dhan_ws():
 def start_ws_thread():
 
     threading.Thread(
-
         target=start_dhan_ws,
-
         daemon=True
-
     ).start()
-
-# =========================================================
-# START DHAN WS
-# =========================================================
-
-start_ws_thread()
 
 # =========================================================
 # MAIN
@@ -906,21 +840,14 @@ start_ws_thread()
 
 if __name__ == "__main__":
 
+    start_ws_thread()
+
     port = int(
-
-        os.environ.get(
-
-            "PORT",
-
-            5000
-        )
+        os.environ.get("PORT", 5000)
     )
 
     socketio.run(
-
         app,
-
         host="0.0.0.0",
-
         port=port
     )
